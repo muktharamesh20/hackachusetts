@@ -61,11 +61,11 @@ graph TD
     margin; wired into transport; pure-numpy unit tests.
   - _Requirements: 3.3, 3.4_
 
-- [ ] 6. Extend obstacle avoidance to the belt scenes
+- [x] 6. Extend obstacle avoidance to the belt scenes
   - Validate/tune on `belt_bare` then `belt_boxes` (box walls + neighbors).
   - _Requirements: 3.3, 3.4, 4.2_
 
-- [ ] 7. Obstacle-aware approach and inter-item moves
+- [x] 7. Obstacle-aware approach and inter-item moves
   - Apply avoidance during approach/grasp and when swinging between bins, not
     just during the carry.
   - _Requirements: 3.3, 3.4_
@@ -79,5 +79,6 @@ graph TD
 
 - Tasks 1-5 and 8 are implemented and on `main`; task 5 is on
   `feature/vision-obstacle-pathing`.
-- Tasks 6-7 are the remaining obstacle-avoidance rollout.
+- Tasks 6-7 (obstacle avoidance on belt scenes + approach phase) are implemented
+  and verified: flat_grid 9/9, belt_bare 9/9, belt_boxes 13/13 sorted.
 - Verify with `pytest tests/ -p no:cacheprovider` and `ruff check` (run in WSL).

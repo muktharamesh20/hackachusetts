@@ -5,6 +5,15 @@ to trace. Newest first. Each entry lists the branch and the key commits.
 
 ---
 
+## Obstacle-avoidance rollout (Tasks 6-7)
+Branch: eature/obstacle-avoidance-rollout
+- Extended vision obstacle avoidance from the carry phase to the policy-driven
+  approach/transport in execute_pick_and_place, and validated on all scenes.
+- _build_obstacles builds the map excluding the grasp-target item (so the arm
+  can reach it); steps lift over obstacles except during the final straight-down
+  descent onto the target. Verified: flat_grid 9/9, belt_bare 9/9, belt_boxes
+  13/13 sorted; EE rises to ~0.23 m over box walls.
+
 ## Vision-based obstacle avoidance (Task D, in progress)
 Branch: `feature/vision-obstacle-pathing`
 - `7802faf` feat: vision-based obstacle avoidance for the carry path (v1)

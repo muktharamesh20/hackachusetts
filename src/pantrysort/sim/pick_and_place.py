@@ -62,6 +62,14 @@ def execute_pick_and_place(
     rel = _wrap_full_turn(station.jaw_heading() - _sideways(ee))
     rel_target = _choose_turn(station, rel, 0.0)
 
+    # Obstacle map from the cameras, excluding the item we are about to grasp
+    # (the arm must reach it). Routes approach/transport over other items and
+    # box walls without hardcoded clearances.
+    from pantrysort.sim.vision_path import lift_over_obstacles
+
+    grasp_position = np.asarray(grasp_position, dtype=float)
+    obstacles = _build_obstacles(station, near=grasp_position)
+
     while not done and steps < max_steps:
         ee = station.ee_position()
         obs = PolicyObservation(
@@ -74,6 +82,12 @@ def execute_pick_and_place(
 
         rel += WRIST_RATE * (rel_target - rel)
         step = _step_around_base(ee, np.asarray(action.ee_target, dtype=float), TRACK_RATE)
+        # Lift over obstacles unless descending onto the grasp target (close in
+        # x,y and not yet holding), where the arm must come straight down.
+        descending = (not station.holding
+                      and float(np.linalg.norm(step[:2] - grasp_position[:2])) < 0.04)
+        if obstacles is not None and not descending:
+            step = lift_over_obstacles(ee, step, obstacles)
         station.move_ee_to(step, jaw_heading=_sideways(step) + rel)
 
         gripper += GRIPPER_RATE * (float(action.gripper) - gripper)
@@ -224,6 +238,25 @@ def _transport_and_drop(station, drop_position: np.ndarray, drop_yaw, dt: float,
         station.set_gripper(0.0)
         station.publish(dt)
     return True
+
+def _build_obstacles(station, near=None, near_radius: float = 0.06):
+    """Obstacle map from the cameras, excluding any item within `near_radius`
+    of `near` (the grasp target) so the arm can reach it. Returns None if the
+    station has no cameras (logic-only runs)."""
+    if not getattr(station, "cameras", None):
+        return None
+    from pantrysort.sim.vision_path import ObstacleMap
+
+    exclude = ()
+    if near is not None:
+        near = np.asarray(near, dtype=float)
+        hits = []
+        for lbl, body in getattr(station, "item_bodies", {}).items():
+            p = np.asarray(station._body_pose(body).translation(), dtype=float)
+            if float(np.linalg.norm(p - near)) <= near_radius:
+                hits.append(lbl)
+        exclude = tuple(hits)
+    return ObstacleMap.from_station(station, exclude_labels=exclude)
 
 def _held_labels(station) -> tuple[str, ...]:
     """Label(s) of the item the arm is currently holding, to exclude from the
