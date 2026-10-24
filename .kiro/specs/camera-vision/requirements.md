@@ -80,6 +80,17 @@ introduced by the collision-reduction work (commits `b855e47`, `ab3c40e`).
 7. IF no read succeeds THEN the arm SHALL return the item upright to its original pose and release it, and the sort loop SHALL route it to the misc bin.
 8. WHEN a straight read succeeds THEN the system SHALL NOT run the rotation search.
 
+### Requirement 6: YOLOX shadow detection
+
+**User Story:** As a developer, I want a pretrained YOLO detector running alongside the QR pipeline, so that I can measure what an off-the-shelf detector can and cannot do here without risking sorting decisions.
+
+#### Acceptance Criteria
+1. WHERE the YOLO detector is enabled THEN the system SHALL use pretrained Apache-2.0 YOLOX COCO weights via onnxruntime on CPU, installed as an optional extra with pinned versions.
+2. WHEN an item is identified (passively or by active presentation) THEN the system SHALL run YOLO on that camera frame and record the detection matched to the item, its class, score, and latency.
+3. WHERE QR identification and YOLO disagree THEN the system SHALL keep the QR result for labeling and routing; YOLO SHALL NOT override or alter it.
+4. WHEN a run finishes THEN the system SHALL report YOLO accuracy against the QR ground truth (detection rate, accuracy on items with a COCO class, unmappable items) and save the observations under `outputs/yolo/`.
+5. IF onnxruntime or the weights are unavailable, or YOLO is disabled by configuration THEN the system SHALL run unchanged without the detector.
+6. WHERE YOLO is evaluated THEN the system SHALL NOT train or fine-tune it on any run results, and SHALL produce a written capability report.
 ## Integration boundary with the pantry app
 
 The camera-vision spec owns perception and motion decisions; it does not own

@@ -65,7 +65,7 @@ def test_held_item_starts_upright(held_station):
     assert st.held_item_tilt() < TILT_MAX
 
 
-@pytest.mark.skip(reason="upright IK in progress (task 12)")
+@pytest.mark.skip(reason="WIP: upright IK unfinished (camera-vision task 14)")
 def test_present_points_reachable_upright(held_station):
     from pantrysort.sim.active_scan import _reachable
 
@@ -77,7 +77,7 @@ def test_present_points_reachable_upright(held_station):
                           item_x_in_hand=x), f"{name} present_at {p} not reachable upright"
 
 
-@pytest.mark.skip(reason="upright IK in progress (task 12)")
+@pytest.mark.skip(reason="WIP: upright IK unfinished (camera-vision task 14)")
 def test_move_held_upright_to_present_points(held_station):
     st = held_station
     for name, p in _present_points(st):
@@ -93,7 +93,7 @@ def test_move_held_upright_to_present_points(held_station):
         assert dyaw < TILT_MAX
 
 
-@pytest.mark.skip(reason="upright IK in progress (task 12)")
+@pytest.mark.skip(reason="WIP: upright IK unfinished (camera-vision task 14)")
 @pytest.mark.parametrize("turn_deg", [90.0, 180.0])
 def test_yaw_targets_hit_while_upright(held_station, turn_deg):
     st = held_station

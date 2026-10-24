@@ -45,6 +45,11 @@ dev = [
     "mypy>=1.10",
     "ipython>=8.0",
 ]
+# Shadow-mode object detector (pretrained YOLOX COCO, Apache-2.0) on CPU.
+# Weights are downloaded to ~/.cache/pantrysort/yolox/ and pinned by SHA-256.
+yolo = [
+    "onnxruntime==1.31.0",
+]
 
 [project.scripts]
 pantrysort-sim = "pantrysort.pipeline.sort_loop:main"
