@@ -30,19 +30,20 @@ def main() -> None:
     station = build_station(
         config=SimConfig(meshcat=False, qr_scanner=False, overhead_camera=True)
     )
-    if station.camera is None:
+    if not station.cameras:
         print("No VTK renderer available; cannot render the camera.")
         return
 
     import cv2
 
-    raw = station.camera_rgb()
-    fe = station.camera_fisheye()
+    cam_name = "robot_cam"
+    raw = station.camera_rgb(cam_name)
+    fe = station.camera_fisheye(cam_name)
     cv2.imwrite(str(out / "camera_raw.png"), cv2.cvtColor(raw, cv2.COLOR_RGBA2BGRA))
     cv2.imwrite(str(out / "camera_fisheye.png"), cv2.cvtColor(fe, cv2.COLOR_RGBA2BGRA))
     print(f"Wrote {out/'camera_raw.png'} and {out/'camera_fisheye.png'}")
 
-    cm = station.camera_model()
+    cm = station.camera_model(cam_name)
     print("\nitem                     true (x,y,z)            vision (x,y,z)        err(cm)")
     for item in station.scene.items:
         p_true = np.array(item.position, dtype=float)
@@ -50,7 +51,7 @@ def main() -> None:
         if not (0 <= u < cm.width and 0 <= v < cm.height):
             print(f"{item.label:24s} (out of frame)")
             continue
-        p_est = station.locate_pixel(u, v)
+        p_est = station.locate_pixel(u, v, cam_name)
         if p_est is None:
             print(f"{item.label:24s} (no depth)")
             continue

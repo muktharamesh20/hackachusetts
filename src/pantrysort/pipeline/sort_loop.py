@@ -1,7 +1,7 @@
 """The end-to-end pantry sort loop.
 
 For each item on the intake mat:
-  1. scan its QR sticker with the gripper camera and decode it (category,
+  1. scan its QR sticker with the fixed camera rig and decode it (category,
      calories, expiry, allergens, lot), showing the result in Meshcat,
   2. decide its storage location: expired items go to the discard bin,
      everything else by category via the inventory store's routing,
@@ -21,7 +21,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Optional
 
 import numpy as np
 
@@ -76,9 +75,9 @@ class SortResult:
 class SortLoop:
     def __init__(
         self,
-        scene: Optional[PantryScene] = None,
-        store: Optional[InventoryStoreProtocol] = None,
-        policy: Optional[Policy] = None,
+        scene: PantryScene | None = None,
+        store: InventoryStoreProtocol | None = None,
+        policy: Policy | None = None,
         config: Config = CONFIG,
         use_sim: bool = True,
     ) -> None:
@@ -108,7 +107,7 @@ class SortLoop:
             self._station = None
         return self._station
 
-    def run(self, today: Optional[date] = None) -> SortResult:
+    def run(self, today: date | None = None) -> SortResult:
         today = today or date.today()
         result = SortResult()
         station = self._maybe_build_station()
@@ -167,24 +166,23 @@ class SortLoop:
     # ------------------------------------------------------------------ scanning
 
     def _identify(self, station, scene_item: SceneItem, today: date) -> ScanOutcome:
-        """Read the item's QR sticker with the gripper camera, if there is one.
+        """Read the item's QR sticker from the fixed camera rig, if present.
 
         Without a rendering station (logic-only runs, CI) the sticker's payload is
         used directly, which is what a perfect scan would return.
         """
         from pantrysort.perception.qr import detection_from_payload
 
-        if station is None or getattr(station, "scanner", None) is None:
+        if station is None or not getattr(station, "cameras", None):
             det = scene_item.to_detection(today, self._catalog)
             text = scene_item.qr.encode() if scene_item.qr else None
             return ScanOutcome(det, scene_item.qr, text)
 
-        from pantrysort.sim.pick_and_place import scan_item
-        from pantrysort.sim.scan_display import LABEL_LIFT
+        from pantrysort.sim.pick_and_place import scan_item_rig
 
-        top = np.asarray(scene_item.position, dtype=float)
-        top[2] += scene_item.shape.size[2] / 2 + LABEL_LIFT
-        reading = scan_item(station, top)
+        # QR stickers are on the item sides; read them from the fixed camera
+        # rig (base wide-angle + external iPhone views), not a gripper camera.
+        reading = scan_item_rig(station)
         if reading.qr is not None:
             try:
                 payload = FoodQrPayload.parse(reading.qr.text)

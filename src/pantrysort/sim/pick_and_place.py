@@ -116,6 +116,32 @@ def scan_item(station, sticker_point: np.ndarray, dt: float = 0.05,
     return ScanReading(image)
 
 
+def scan_item_rig(station, dt: float = 0.05) -> ScanReading:
+    """Read QR stickers from the fixed camera rig (no gripper camera).
+
+    Renders each rig camera in turn and decodes any QR codes it sees. Returns
+    the first successful read, keeping the `ScanReading` shape so the Meshcat
+    scan-card display works unchanged. The camera image returned is the fisheye
+    (what the wide base lens actually sees) for the base camera, else the raw
+    frame. With QR stickers on the item sides, the side-viewing rig cameras can
+    read them where a top-down or gripper camera could not.
+    """
+    from pantrysort.perception.qr import decode_qr_codes
+
+    image = None
+    for name in station.camera_names():
+        frame = station.camera_rgb(name)
+        if frame is None:
+            continue
+        image = frame
+        codes = decode_qr_codes(frame)
+        if codes:
+            h, w = frame.shape[:2]
+            best = min(codes, key=lambda c: np.hypot(c.center_px[0] - w / 2,
+                                                     c.center_px[1] - h / 2))
+            return ScanReading(frame, best)
+    return ScanReading(image)
+
 MIN_RADIUS = 0.15  # keep the hand this far from the SO-101's base axis while swinging (m)
 
 

@@ -695,9 +695,18 @@ def _register_qr_sticker(plant, body, item, name: str, out_dir: Path) -> None:
     from pantrysort.sim.scan_display import LABEL_LIFT, label_size, write_qr_label_mesh
 
     size = item.shape.size
-    obj = write_qr_label_mesh(item.qr, out_dir, f"{name}_qr", label_size(size))
-    instance = GeometryInstance(RigidTransform([0.0, 0.0, size[2] / 2 + LABEL_LIFT]),
-                                Mesh(str(obj)), f"{name}_qr_visual")
+    from pydrake.math import RotationMatrix
+
+    # Sticker sized to the item's side (x-z) face; placed on the +x face,
+    # which faces the arm/camera rig since items are placed facing the arm.
+    side = min(label_size((size[0], size[2], size[2])), 0.9 * min(size[0], size[2]))
+    obj = write_qr_label_mesh(item.qr, out_dir, f"{name}_qr", side)
+    # The quad faces +z in its own frame; rotate so its normal is +x and
+    # shift it onto the side face.
+    X_sticker = RigidTransform(
+        RotationMatrix.MakeYRotation(np.pi / 2), [size[0] / 2 + LABEL_LIFT, 0.0, 0.0]
+    )
+    instance = GeometryInstance(X_sticker, Mesh(str(obj)), f"{name}_qr_visual")
     # No diffuse color: both Meshcat and VTK then use the OBJ's texture.
     instance.set_illustration_properties(IllustrationProperties())
     perception = PerceptionProperties()
