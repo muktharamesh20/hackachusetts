@@ -121,6 +121,7 @@ SCAN_DISTANCES = (0.065, 0.055, 0.075, 0.05)
 MAX_JOINT_SPEED = 2.5       # rad/s per joint
 MAX_JOINT_ACCEL = 8.0       # rad/s^2 per joint
 MAX_JOINT_STEP = 0.15       # hard cap on |dq| applied in a single move_ee_to call (rad)
+MAX_DROP_STEP = 0.015       # max per-frame fall of a released item (m): gentle settle
 
 # Default Meshcat viewpoint (the scan card and bin signs are placed to face it).
 MESHCAT_CAMERA = np.array([0.95, -0.75, 0.62])
@@ -363,8 +364,12 @@ class Station:
         final = current if yaw is None else _nearest_equivalent(yaw, current, np.pi)
         q0 = X0.rotation().ToQuaternion()
         q1 = RotationMatrix.MakeZRotation(final).ToQuaternion()
-        for k in range(1, frames + 1):
-            s = (k / frames) ** 2  # accelerate like a fall
+        # Gentle settle: split the remaining drop into steps no taller than
+        # `MAX_DROP_STEP` so the item never lurches, with a soft ease-out.
+        dist = float(np.linalg.norm(np.asarray(end) - np.asarray(start)))
+        n = max(frames, int(np.ceil(dist / MAX_DROP_STEP)))
+        for k in range(1, n + 1):
+            s = 1.0 - (1.0 - k / n) ** 2  # ease out (fast then slow, like landing)
             self.plant.SetFreeBodyPose(
                 self.plant_context, body,
                 RigidTransform(RotationMatrix(q0.slerp(s, q1)), start + s * (end - start)),
