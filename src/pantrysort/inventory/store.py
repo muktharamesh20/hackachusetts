@@ -24,7 +24,7 @@ from pantrysort.inventory.models import (
 from pantrysort.inventory.nutrition import NutritionSummary, fefo_order, summarize
 
 
-class InventoryStore:
+class InMemoryInventoryStore:
     def __init__(self, locations: Optional[Iterable[StorageLocation]] = None) -> None:
         self._items: dict[str, InventoryItem] = {}
         self._transactions: list[Transaction] = []
@@ -115,3 +115,7 @@ class InventoryStore:
 
     def transactions(self) -> list[Transaction]:
         return list(self._transactions)
+
+
+# Backward-compatible alias (the original class name).
+InventoryStore = InMemoryInventoryStore

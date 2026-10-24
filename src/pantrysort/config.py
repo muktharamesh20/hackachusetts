@@ -39,8 +39,16 @@ class PolicyConfig:
 
 @dataclass(frozen=True)
 class InventoryConfig:
-    db_url: str = os.getenv("PANTRYSORT_DB_URL", "sqlite:///pantry.db")
+    # Backend: "memory" (default) or "supabase".
+    backend: str = os.getenv("PANTRYSORT_INVENTORY_BACKEND", "memory")
     expiry_warn_days: int = _get_int("PANTRYSORT_EXPIRY_WARN_DAYS", 14)
+
+    # Supabase connection. Prefer the service-role key for server-side seeding;
+    # use the anon key for client/app contexts. Never commit real values.
+    supabase_url: str = os.getenv("SUPABASE_URL", "")
+    supabase_key: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv(
+        "SUPABASE_KEY", ""
+    )
 
 
 @dataclass(frozen=True)

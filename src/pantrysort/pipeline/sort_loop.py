@@ -25,7 +25,8 @@ import numpy as np
 
 from pantrysort.config import CONFIG, Config
 from pantrysort.inventory.models import InventoryItem
-from pantrysort.inventory.store import InventoryStore
+from pantrysort.inventory.base import InventoryStoreProtocol
+from pantrysort.inventory.factory import make_store
 from pantrysort.perception.classifier import Detection
 from pantrysort.policy.lerobot_policy import Policy, make_policy
 from pantrysort.sim.pantry_scene import (
@@ -51,14 +52,14 @@ class SortLoop:
     def __init__(
         self,
         scene: Optional[PantryScene] = None,
-        store: Optional[InventoryStore] = None,
+        store: Optional[InventoryStoreProtocol] = None,
         policy: Optional[Policy] = None,
         config: Config = CONFIG,
         use_sim: bool = True,
     ) -> None:
         self.config = config
         self.scene = scene or default_scene()
-        self.store = store or InventoryStore(locations=self.scene.locations)
+        self.store = store or make_store(locations=self.scene.locations, config=config)
         self.policy = policy or make_policy(
             config.policy.backend,
             policy_path=config.policy.lerobot_policy_path,

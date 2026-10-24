@@ -21,6 +21,7 @@ pillow>=10.0
 pydantic>=2.5
 python-dateutil>=2.8
 sqlalchemy>=2.0
+supabase>=2.4
 
 # --- Config / CLI ---
 pyyaml>=6.0
