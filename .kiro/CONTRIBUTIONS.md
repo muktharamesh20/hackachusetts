@@ -4,6 +4,64 @@ A running record of what Kiro has built on PantrySort, so contributions are easy
 to trace. Newest first. Each entry lists the branch and the key commits.
 
 ---
+## Active presentation fix (camera-vision tasks 11 + interim)
+Branch: `feature/obstacle-avoidance-rollout`
+- `CameraSpec.present` / `present_at`; iPhone cameras moved onto raised stands
+  beside the belt with fixed present points; `robot_cam` never a target.
+- Straight read at each present point first; rotation is a once-per-item last
+  resort (wrist_roll only, one direction, 90-degree stops held 0.5 s, max 270).
+- Baseline vs fixed recordings: 5 items spun (one at robot_cam) -> 0; 9/9 sorted.
+## Revert collision-avoidance motion (camera-vision task 9)
+Branch: `feature/obstacle-avoidance-rollout`
+- Removed the depth `ObstacleMap` / `lift_over_obstacles` wiring from
+  `pick_and_place.py` (approach + carry) and the open-loop `_lift_straight_up`
+  from `active_scan.py`. Approach/carry are back to `_step_around_base` + hover.
+- Kept the placement fixes (low release, gentle settle clamp, no-teleport moves,
+  no-spin release). `vision_path.py` stays as an unused library.
+
+## Robot / app / Supabase integration audit and spec baseline
+
+Branch: `main` (documentation/spec update; no application code changed in this pass)
+
+- Audited the current SO-101 camera-vision simulation, QR assets/catalog,
+  lot-aware Supabase migrations, Python inventory adapter, and Expo/React Native
+  app.
+- Added `.kiro/specs/pantry-app-integration/requirements.md`, `design.md`, and
+  `tasks.md` to reconcile the existing implementations rather than create a
+  second greenfield app contract.
+- Recorded the key integration gaps: legacy Python categories versus current app
+  categories, single-row inventory versus lot-aware expiry, non-atomic
+  multi-request mutations, stale legacy schema/docs, and PantrySort versus Stash
+  naming.
+- Updated the camera-vision spec with its boundary to the canonical catalog,
+  lot-aware backend, and idempotent robot-intake event.
+- Updated steering with the current Expo/Supabase architecture, RLS/service-key
+  rules, QR/catalog precedence, and native iOS Release-build conventions.
+- The camera-vision spec still leaves Tasks 6ΓÇô7 open on `main`; claims from the
+  unmerged obstacle-avoidance rollout must be validated before marking them done.
+
+
+## Scan reorientation, vertical lift, camera markers
+Branch: `feature/obstacle-avoidance-rollout`
+- Active scan now does an observation-guided **reorientation search**: if an item
+  (e.g. the apple's curved sticker) does not read at a camera, it rotates
+  wrist_roll / tilts wrist_flex, measures the QR quad area to climb toward a
+  fronto-parallel view, and stops on decode. Strict position gate (0.06 m) so a
+  neighbour's QR is never accepted.
+- After grasping, the arm **lifts the item straight up** before any sideways
+  motion so it clears neighbours; drop settle is clamped to not sink below the
+  surface (ground-collision guard).
+- Meshcat now **draws each camera** as a cylinder (orange = on-arm base cam, blue
+  = external) with a line back to the base.
+
+## Obstacle-avoidance rollout (Tasks 6-7)
+Branch: `feature/obstacle-avoidance-rollout`
+- Extended vision obstacle avoidance from the carry phase to the policy-driven
+  approach/transport in execute_pick_and_place, and validated on all scenes.
+- _build_obstacles builds the map excluding the grasp-target item (so the arm
+  can reach it); steps lift over obstacles except during the final straight-down
+  descent onto the target. Verified: flat_grid 9/9, belt_bare 9/9, belt_boxes
+  13/13 sorted; EE rises to ~0.23 m over box walls.
 
 ## Vision-based obstacle avoidance (Task D, in progress)
 Branch: `feature/vision-obstacle-pathing`
@@ -52,25 +110,3 @@ Branch: `docs/wsl-drake-setup-notes` -> `main` (PR #2)
 - `DEV_NOTES.md`: known-good WSL + Python 3.12 + Drake setup (no Windows wheels);
   notes the kinematic sim and the camera-rig direction.
 - `src/pantrysort/sim/README.md`: arm API + run instructions.
-
-
-## Robot / app / Supabase integration audit and spec baseline
-
-Branch: `main` (documentation/spec update; no application code changed in this pass)
-
-- Audited the current SO-101 camera-vision simulation, QR assets/catalog,
-  lot-aware Supabase migrations, Python inventory adapter, and Expo/React Native
-  app.
-- Added `.kiro/specs/pantry-app-integration/requirements.md`, `design.md`, and
-  `tasks.md` to reconcile the existing implementations rather than create a
-  second greenfield app contract.
-- Recorded the key integration gaps: legacy Python categories versus current app
-  categories, single-row inventory versus lot-aware expiry, non-atomic
-  multi-request mutations, stale legacy schema/docs, and PantrySort versus Stash
-  naming.
-- Updated the camera-vision spec with its boundary to the canonical catalog,
-  lot-aware backend, and idempotent robot-intake event.
-- Updated steering with the current Expo/Supabase architecture, RLS/service-key
-  rules, QR/catalog precedence, and native iOS Release-build conventions.
-- The camera-vision spec still leaves Tasks 6–7 open on `main`; claims from the
-  unmerged obstacle-avoidance rollout must be validated before marking them done.

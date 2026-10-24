@@ -16,6 +16,10 @@ Pipeline:
 
 Numpy only; pydrake stays in the station. The EE "radius" is a safety bubble
 around the gripper/held item.
+
+Status: currently unused. Depth-obstacle rerouting was retired from
+``sim/pick_and_place.py`` (approach/carry follow the base-swing path with a hover
+over the drop). The module and its tests are kept so it can be reused later.
 """
 
 from __future__ import annotations

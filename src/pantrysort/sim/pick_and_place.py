@@ -193,20 +193,13 @@ def _transport_and_drop(station, drop_position: np.ndarray, drop_yaw, dt: float,
     else:
         rel_target = rel
 
-    # Build an obstacle map from the cameras (excluding whatever is held) so the
-    # carry path can rise over clutter instead of clipping through it.
-    from pantrysort.sim.vision_path import ObstacleMap, lift_over_obstacles
-
-    obstacles = ObstacleMap.from_station(station, exclude_labels=_held_labels(station))
-
-    # Carry to a hover over the drop, turning the item to its drop yaw en route,
-    # raising the swing step whenever it would come too close to an obstacle.
+    # Carry to a hover over the drop (swinging around the base), turning the
+    # item to its drop yaw en route.
     hover = drop_position + np.array([0.0, 0.0, 0.08])
     for _ in range(steps):
         ee = station.ee_position()
         rel += WRIST_RATE * (rel_target - rel)
         step = _step_around_base(ee, hover, TRACK_RATE)
-        step = lift_over_obstacles(ee, step, obstacles)
         station.move_ee_to(step, jaw_heading=_sideways(step) + rel)
         station.publish(dt)
 
@@ -225,17 +218,6 @@ def _transport_and_drop(station, drop_position: np.ndarray, drop_yaw, dt: float,
         station.publish(dt)
     return True
 
-def _held_labels(station) -> tuple[str, ...]:
-    """Label(s) of the item the arm is currently holding, to exclude from the
-    obstacle map (the held item is not an obstacle to itself)."""
-    held = getattr(station, "_held", None)
-    if held is None:
-        return ()
-    body = held[0]
-    for lbl, b in getattr(station, "item_bodies", {}).items():
-        if b is body:
-            return (lbl,)
-    return ()
 
 def _sideways(p: np.ndarray) -> float:
     """Default jaw heading at ``p``: tangent to the arm's reach direction."""
