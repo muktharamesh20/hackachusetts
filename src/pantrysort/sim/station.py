@@ -145,6 +145,7 @@ class Station:
     scanner: Any = None        # RgbdSensor on the gripper (None = rendering unavailable)
     cameras: dict = field(default_factory=dict)  # name -> RgbdSensor (localization rig)
     camera_specs: dict = field(default_factory=dict)  # name -> CameraSpec
+    frame_hooks: list = field(default_factory=list)  # callbacks(station) run each publish()
     scan_display: Any = None   # ScanDisplay for Meshcat (None without Meshcat)
     _asset_dir: Any = None     # TemporaryDirectory holding generated sticker/card meshes
     _ik: Any = None
@@ -457,6 +458,8 @@ class Station:
         ctx = self.context
         ctx.SetTime(ctx.get_time() + dt)
         self.diagram.ForcedPublish(ctx)
+        for hook in self.frame_hooks:
+            hook(self)
         if self.meshcat is not None and self.realtime_rate > 0:
             time.sleep(dt / self.realtime_rate)
 
