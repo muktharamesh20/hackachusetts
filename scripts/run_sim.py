@@ -11,6 +11,7 @@ prints an inventory report.
 from __future__ import annotations
 
 import logging
+import time
 
 from pantrysort.config import CONFIG
 from pantrysort.pipeline.sort_loop import SortLoop
@@ -27,6 +28,10 @@ def main() -> None:
         fmt = "%(levelname)s %(name)s: %(message)s"
 
     logging.basicConfig(level=CONFIG.log_level, format=fmt, handlers=handlers)
+    # Drake's forwarded log records have no source path, which RichHandler can't render.
+    drake_log = logging.getLogger("drake")
+    drake_log.propagate = False
+    drake_log.addHandler(logging.StreamHandler())
 
     loop = SortLoop(use_sim=True)
     result = loop.run()
@@ -35,9 +40,16 @@ def main() -> None:
     if result.unresolved:
         print(f"{len(result.unresolved)} item(s) had no storage route.")
 
-    if loop._station is not None and getattr(loop._station, "meshcat", None):
-        print("\nMeshcat is running. Open the printed URL to view the scene.")
-        input("Press Enter to exit...")
+    meshcat = getattr(loop._station, "meshcat", None)
+    if meshcat is not None:
+        print(f"\nMeshcat: {meshcat.web_url()}")
+        print("Replay the run from Meshcat's Animation controls (top right, 'play').")
+        print("Press Ctrl+C to exit.")
+        try:
+            while True:  # keep the Meshcat server alive (works with or without a TTY)
+                time.sleep(1.0)
+        except KeyboardInterrupt:
+            pass
 
 
 if __name__ == "__main__":

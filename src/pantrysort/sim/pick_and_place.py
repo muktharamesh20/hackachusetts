@@ -1,22 +1,25 @@
 """Execute a pick-and-place for one item by stepping a policy in the station.
 
-This is the bridge between a :class:`~pantrysort.policy.lerobot_policy.Policy`
-and the Drake simulation. For the scripted backend it advances the end-effector
-through the policy's waypoints and steps the simulator so the motion is
-visualized in Meshcat. For a LeRobot backend, the same loop feeds observations
-(including rendered camera frames, if wired up) and applies returned actions.
+Bridge between a :class:`~pantrysort.policy.lerobot_policy.Policy` and the Drake
+station. Each control step:
 
-The task-space tracking here is deliberately simple: the focus of the scaffold
-is the overall sort pipeline and the clean seams between simulation, policy,
-and inventory. Swapping in a full differential-IK / operational-space controller
-is a well-isolated change inside :func:`execute_pick_and_place`.
+  1. read the grasp-point position from the arm's current joint angles,
+  2. ask the policy for an end-effector target + gripper command,
+  3. move a short step toward the target (first-order tracking) and IK the arm
+     there, open/close the gripper, attach/release the item, and
+  4. publish a frame to Meshcat.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
 from pantrysort.policy.lerobot_policy import Policy, PolicyObservation
+
+TRACK_RATE = 0.25    # fraction of the remaining distance covered per step
+GRIPPER_RATE = 0.5
 
 
 def execute_pick_and_place(
@@ -26,23 +29,24 @@ def execute_pick_and_place(
     drop_position: np.ndarray,
     max_steps: int = 400,
     dt: float = 0.05,
+    grasp_width: float | None = None,
+    drop_yaw: float = 0.0,
 ) -> bool:
     """Run the policy until it reports ``done`` or ``max_steps`` elapses.
 
-    Returns True if the policy signalled completion.
-
-    The end-effector state is tracked in task space. When a real Drake arm and
-    IK controller are wired into the station, replace ``_ee_position`` /
-    ``_apply_action`` with reads/writes against the plant context.
+    ``grasp_width`` (m) sets where the item sits between the jaws and how far they
+    close; ``drop_yaw`` is the item's final heading on the pad. Returns True if the
+    policy signalled completion.
     """
     policy.reset()
-
-    ee = _ee_position(station)
+    if grasp_width is not None:
+        station.prepare_grasp(grasp_width)
     gripper = 0.0
     done = False
     steps = 0
 
     while not done and steps < max_steps:
+        ee = station.ee_position()
         obs = PolicyObservation(
             ee_position=ee.copy(),
             gripper=gripper,
@@ -51,39 +55,84 @@ def execute_pick_and_place(
         )
         action = policy.select_action(obs)
 
-        # First-order tracking toward the commanded target (task-space proxy).
-        ee = _step_toward(ee, np.asarray(action.ee_target, dtype=float), rate=0.25)
-        gripper = float(action.gripper)
-        done = action.done
+        target = np.asarray(action.ee_target, dtype=float)
+        station.move_ee_to(_step_around_base(ee, target, TRACK_RATE))
 
-        _advance_sim(station, dt)
+        gripper += GRIPPER_RATE * (float(action.gripper) - gripper)
+        if action.gripper >= 0.5 and not station.holding:
+            station.attach_nearest()
+        elif action.gripper < 0.5 and station.holding:
+            station.drop_held_onto(np.asarray(drop_position, dtype=float), dt, yaw=drop_yaw)
+        station.set_gripper(gripper)
+
+        done = action.done
+        station.publish(dt)
         steps += 1
 
+    # Let the gripper finish opening and settle for a moment between items.
+    for _ in range(4):
+        gripper *= 1 - GRIPPER_RATE
+        station.set_gripper(gripper)
+        station.publish(dt)
     return done
 
 
-def _ee_position(station) -> np.ndarray:
-    """Current end-effector position. Falls back to a nominal home pose."""
-    try:  # pragma: no cover - env dependent
-        plant = station.plant
-        context = station.simulator.get_context()
-        plant_context = plant.GetMyContextFromRoot(context)
-        frame = plant.GetFrameByName("iiwa_link_7")
-        pose = plant.CalcRelativeTransform(
-            plant_context, plant.world_frame(), frame
-        )
-        return np.asarray(pose.translation(), dtype=float)
-    except Exception:
-        return np.array([0.3, 0.0, 0.4])
+@dataclass
+class ScanReading:
+    """What the gripper camera saw over one item."""
+
+    image: np.ndarray | None          # RGBA frame (None if the camera is unavailable)
+    qr: object | None = None          # DecodedQr of the sticker, if one was read
 
 
-def _step_toward(current: np.ndarray, target: np.ndarray, rate: float) -> np.ndarray:
-    return current + rate * (target - current)
+def scan_item(station, sticker_point: np.ndarray, dt: float = 0.05,
+              dwell_frames: int = 4) -> ScanReading:
+    """Hover the gripper's scanner over ``sticker_point`` and decode the QR there.
+
+    Tries a few camera heights (reachability and decode quality vary across the
+    intake grid). If several codes are in view (neighbours), takes the one
+    nearest the image center, which is the sticker the camera is aimed at.
+    """
+    from pantrysort.perception.qr import decode_qr_codes
+    from pantrysort.sim.station import SCAN_DISTANCES
+
+    image = None
+    for distance in SCAN_DISTANCES:
+        q = station.scan_pose(np.asarray(sticker_point, dtype=float), distance)
+        if q is None:
+            continue
+        station.move_joints_to(q, dt)
+        for _ in range(dwell_frames):  # hold still while "scanning"
+            station.publish(dt)
+        image = station.scanner_image()
+        if image is None:
+            return ScanReading(None)
+        codes = decode_qr_codes(image)
+        if codes:
+            h, w = image.shape[:2]
+            best = min(codes, key=lambda c: np.hypot(c.center_px[0] - w / 2,
+                                                     c.center_px[1] - h / 2))
+            return ScanReading(image, best)
+    return ScanReading(image)
 
 
-def _advance_sim(station, dt: float) -> None:
-    try:  # pragma: no cover - env dependent
-        sim = station.simulator
-        sim.AdvanceTo(sim.get_context().get_time() + dt)
-    except Exception:
-        pass
+MIN_RADIUS = 0.15  # keep the hand this far from the SO-101's base axis while swinging (m)
+
+
+def _step_around_base(current: np.ndarray, target: np.ndarray, rate: float) -> np.ndarray:
+    """One tracking step in cylindrical coordinates about the arm base (z axis).
+
+    A straight Cartesian line between, e.g., the intake tray and the freezer
+    passes through the robot's own base; sweeping the angle instead makes the arm
+    swing around it like a real pick-and-place.
+    """
+    r0, th0 = np.hypot(current[0], current[1]), np.arctan2(current[1], current[0])
+    r1, th1 = np.hypot(target[0], target[1]), np.arctan2(target[1], target[0])
+    dth = (th1 - th0 + np.pi) % (2 * np.pi) - np.pi  # shortest way around
+    r = r0 + rate * (r1 - r0)
+    # Only enforce the clearance while swinging, so final targets stay exact.
+    if abs(dth) > 0.2:
+        r = max(r, MIN_RADIUS)
+    th = th0 + rate * dth
+    z = current[2] + rate * (target[2] - current[2])
+    return np.array([r * np.cos(th), r * np.sin(th), z])

@@ -56,7 +56,7 @@ class ScriptedPolicy:
     It needs ``target_position`` and ``goal_position`` on the observation.
     """
 
-    APPROACH_H = 0.12   # hover height above target before descending (m)
+    APPROACH_H = 0.07   # hover height above target before descending (m), sized for SO-101
     REACH_TOL = 0.01    # position tolerance to consider a waypoint reached (m)
 
     def __init__(self) -> None:

@@ -1,0 +1,134 @@
+# PantrySort food catalog: QR sku -> static product facts.
+# category must be a FoodCategory value (see src/pantrysort/inventory/models.py).
+# shelf_life_days is only used when a QR label has no exp date.
+# shape names a mesh in assets/items/shapes.yaml (how the item looks in the sim);
+# meshes come from scripts/generate_printables.py and the apples 3MF.
+
+# --- Canned goods ---------------------------------------------------------------
+BEANS-BLK-CAN:
+  name: Black beans (can)
+  category: canned
+  unit_calories: 330
+  shelf_life_days: 540
+  allergens: []
+  shape: soup_can
+
+TUNA-CAN:
+  name: Tuna (can)
+  category: canned
+  unit_calories: 200
+  shelf_life_days: 900
+  allergens: [fish]
+  shape: tuna_can
+
+# --- Dry goods ------------------------------------------------------------------
+SPAGHETTI-BOX:
+  name: Spaghetti (box)
+  category: dry_goods
+  unit_calories: 800
+  shelf_life_days: 365
+  allergens: [wheat]
+  shape: pasta_box
+
+CEREAL-BOX:
+  name: Cereal (box)
+  category: dry_goods
+  unit_calories: 1600
+  shelf_life_days: 270
+  allergens: [wheat]
+  shape: cereal_box
+
+RICE-BAG:
+  name: Rice (bag)
+  category: dry_goods
+  unit_calories: 3600
+  shelf_life_days: 730
+  allergens: []
+  shape: rice_bag
+
+FORMULA-CAN:
+  name: Infant formula (can)
+  category: baby
+  unit_calories: 2600
+  shelf_life_days: 120
+  allergens: [milk]
+  shape: soup_can
+
+# --- Cooking basics -------------------------------------------------------------
+OLIVE-OIL:
+  name: Olive oil (bottle)
+  category: condiment
+  unit_calories: 4000
+  shelf_life_days: 540
+  allergens: []
+  shape: olive_oil_bottle
+
+SALT:
+  name: Salt (shaker)
+  category: condiment
+  unit_calories: 0
+  shelf_life_days: 1825
+  allergens: []
+  shape: salt_shaker
+
+FLOUR-BAG:
+  name: Flour (bag)
+  category: dry_goods
+  unit_calories: 3300
+  shelf_life_days: 240
+  allergens: [wheat]
+  shape: flour_bag
+
+PB-JAR:
+  name: Peanut butter (jar)
+  category: condiment
+  unit_calories: 2500
+  shelf_life_days: 300
+  allergens: [peanut]
+  shape: peanut_butter_jar
+
+# --- Fresh / cold ---------------------------------------------------------------
+APPLE:
+  name: Apple
+  category: produce
+  unit_calories: 95
+  shelf_life_days: 30
+  allergens: []
+  shape: apple_a
+
+MILK-CARTON:
+  name: Milk (carton)
+  category: dairy
+  unit_calories: 600
+  shelf_life_days: 10
+  allergens: [milk]
+  shape: milk_carton
+
+PEAS-FROZEN-BAG:
+  name: Frozen peas (bag)
+  category: frozen
+  unit_calories: 350
+  shelf_life_days: 200
+  allergens: []
+  shape: frozen_peas_bag
+
+# --- Non-food essentials --------------------------------------------------------
+TOOTHPASTE:
+  name: Toothpaste
+  category: non_food
+  shape: toothpaste
+
+SOAP-BAR:
+  name: Bar soap
+  category: non_food
+  shape: soap_bar
+
+TOILET-PAPER:
+  name: Toilet paper (roll)
+  category: non_food
+  shape: toilet_paper
+
+SHAMPOO:
+  name: Shampoo
+  category: non_food
+  shape: shampoo_bottle

@@ -30,7 +30,7 @@ from pantrysort.inventory.factory import make_store
 from pantrysort.perception.classifier import Detection
 from pantrysort.policy.lerobot_policy import Policy, make_policy
 from pantrysort.sim.pantry_scene import (
-    LOCATION_DROP_POINTS,
+    PadLayout,
     PantryScene,
     default_scene,
 )
@@ -87,6 +87,9 @@ class SortLoop:
         today = today or date.today()
         result = SortResult()
         station = self._maybe_build_station()
+        self._pads = PadLayout()
+        if station is not None:
+            station.start_recording()
 
         for detection in self.scene.detections(today):
             location = self.store.location_for_category(detection.category)
@@ -111,18 +114,26 @@ class SortLoop:
                 item.expiration_date,
             )
 
+        if station is not None:
+            station.finish_recording()
         self._log_report()
         return result
 
     def _pick_and_place(self, station, detection: Detection, location_id: str) -> None:
+        from pantrysort.sim.pantry_scene import BOX
         from pantrysort.sim.pick_and_place import execute_pick_and_place
 
-        drop = LOCATION_DROP_POINTS.get(location_id, (0.0, 0.0, 0.2))
+        shapes = {it.label: it.shape for it in self.scene.items}
+        shape = shapes.get(detection.label, BOX)
+        # Items sharing a location fill the pad's slots, then stack.
+        drop, yaw = self._pads.place(location_id, shape.size[2])
         execute_pick_and_place(
             station,
             self.policy,
             grasp_position=np.asarray(detection.position, dtype=float),
             drop_position=np.asarray(drop, dtype=float),
+            grasp_width=shape.grip_width,
+            drop_yaw=yaw,
         )
 
     def _log_report(self) -> None:
