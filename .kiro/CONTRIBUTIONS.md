@@ -74,3 +74,11 @@ Branch: `docs/wsl-drake-setup-notes` -> `main` (PR #2)
 - `DEV_NOTES.md`: known-good WSL + Python 3.12 + Drake setup (no Windows wheels);
   notes the kinematic sim and the camera-rig direction.
 - `src/pantrysort/sim/README.md`: arm API + run instructions.
+
+## Revert collision-avoidance motion (camera-vision task 9)
+Branch: `feature/obstacle-avoidance-rollout`
+- Removed the depth `ObstacleMap` / `lift_over_obstacles` wiring from
+  `pick_and_place.py` (approach + carry) and the open-loop `_lift_straight_up`
+  from `active_scan.py`. Approach/carry are back to `_step_around_base` + hover.
+- Kept the placement fixes (low release, gentle settle clamp, no-teleport moves,
+  no-spin release). `vision_path.py` stays as an unused library.

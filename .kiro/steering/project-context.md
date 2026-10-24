@@ -44,8 +44,13 @@ actual import instead.
 
 - Motion is velocity/acceleration-limited (`move_ee_to_smooth`, `_ramp_to`) and
   per-call joint-step clamped; avoid snapping joints.
-- Prefer vision/depth-derived decisions over hardcoded clearances, so sim and
-  real differences are tolerated (see `sim/vision_path.py`).
+- Approach and carry follow the base-swing path (`_step_around_base`) with a
+  hover over the drop point, then a gentle low set-down. Depth-obstacle
+  rerouting is retired: `sim/vision_path.py` (`ObstacleMap`,
+  `lift_over_obstacles`) is kept as an unused library and is not wired into
+  motion.
+- Derive clearances from scene geometry (box walls, neighbour heights) rather
+  than fixed magic offsets, so sim and real differences are tolerated.
 - Outputs (camera frames, videos, diagnostics) go under `outputs/` (gitignored),
   in timestamped run folders.
 - Branch per feature; keep `main` as the integration line. Verify with
