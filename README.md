@@ -80,6 +80,10 @@ hackachusetts/
 
 ## Quick start
 
+> **On Windows?** Drake has no Windows wheels - run the simulation under WSL.
+> See [`DEV_NOTES.md`](DEV_NOTES.md) for a known-good WSL + Python 3.12 setup.
+> Use Python 3.10-3.12 everywhere (3.13/3.14 are too new for Drake).
+
 ### 1. Create the environment
 
 **Option A — Conda (recommended, handles ffmpeg + Python version cleanly):**
