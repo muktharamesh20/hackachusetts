@@ -24,8 +24,8 @@ import numpy as np
 from pantrysort.perception.classifier import Detection
 from pantrysort.perception.qr_payload import FoodQrPayload
 
-LABEL_MAX_SIZE = 0.036   # QR sticker edge (m); big enough to decode from ~9 cm
-LABEL_FILL = 0.92        # sticker edge as a fraction of the item's smaller top dimension
+LABEL_MAX_SIZE = 0.050   # QR sticker edge (m); big enough to decode from ~9 cm
+LABEL_FILL = 0.98        # sticker edge as a fraction of the item's smaller top dimension
 LABEL_LIFT = 0.0008      # sticker sits this far above the item's bounding box top (m)
 
 
@@ -69,7 +69,7 @@ def write_qr_label_mesh(payload: FoodQrPayload, out_dir: Path, name: str,
     """A ``size`` x ``size`` m QR sticker (quiet zone included) as a textured OBJ."""
     from pantrysort.perception.qr import make_qr_image
 
-    return write_textured_quad(make_qr_image(payload, scale=8), out_dir, name, size, size)
+    return write_textured_quad(make_qr_image(payload, scale=16), out_dir, name, size, size)
 
 
 # --------------------------------------------------------------------------- card

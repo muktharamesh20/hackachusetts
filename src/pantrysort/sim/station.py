@@ -98,6 +98,14 @@ SCANNER_FOV_Y = np.radians(45)
 # longer fits in the 45 degree view.
 SCAN_DISTANCES = (0.09, 0.08, 0.10, 0.07)
 
+# Motion limits for smooth, non-glitchy kinematic moves. The arm is driven by
+# setting joint angles directly, so we cap how far each joint may move per
+# simulated second (velocity) and how fast that rate may change (acceleration),
+# then interpolate every move to respect them.
+MAX_JOINT_SPEED = 2.5       # rad/s per joint
+MAX_JOINT_ACCEL = 8.0       # rad/s^2 per joint
+MAX_JOINT_STEP = 0.15       # hard cap on |dq| applied in a single move_ee_to call (rad)
+
 # Default Meshcat viewpoint (the scan card is placed to face it).
 MESHCAT_CAMERA = np.array([0.55, -0.45, 0.45])
 MESHCAT_TARGET = np.array([0.1, 0.0, 0.05])
@@ -135,6 +143,9 @@ class Station:
     item_shapes: dict[str, ItemShape] = field(default_factory=dict)
     realtime_rate: float = 1.0
     scanner: Any = None        # RgbdSensor on the gripper (None = rendering unavailable)
+    cameras: dict = field(default_factory=dict)  # name -> RgbdSensor (localization rig)
+    camera_specs: dict = field(default_factory=dict)  # name -> CameraSpec
+    frame_hooks: list = field(default_factory=list)  # callbacks(station) run each publish()
     scan_display: Any = None   # ScanDisplay for Meshcat (None without Meshcat)
     _asset_dir: Any = None     # TemporaryDirectory holding generated sticker/card meshes
     _ik: Any = None
@@ -172,14 +183,56 @@ class Station:
         self._closed_q = gripper_angle_for_width(width)
 
     def move_ee_to(self, p_W: np.ndarray) -> bool:
-        """IK the arm so the grasp point reaches ``p_W`` with the gripper pointing roughly down."""
-        q, ok = self._ik.solve(np.asarray(p_W, dtype=float), self.joint_positions(),
-                               self._grasp_offset)
+        """IK the arm so the grasp point reaches ``p_W`` with the gripper pointing roughly down.
+
+        The per-call joint change is clamped (``MAX_JOINT_STEP``) so an IK jump
+        (e.g. an elbow flip between nearby targets) eases over several calls
+        instead of snapping.
+        """
+        q0 = self.joint_positions()
+        q, ok = self._ik.solve(np.asarray(p_W, dtype=float), q0, self._grasp_offset)
         if not ok:
             logger.debug("IK did not converge for %s; keeping best effort.", p_W)
+        q = _clamp_joint_step(q0, q, MAX_JOINT_STEP, self._ik.gripper_index)
         self.plant.SetPositions(self.plant_context, self.arm, q)
         self._update_held()
         return ok
+
+    def move_ee_to_smooth(self, p_W: np.ndarray, dt: float,
+                          max_speed: float = MAX_JOINT_SPEED,
+                          max_accel: float = MAX_JOINT_ACCEL) -> bool:
+        """IK to ``p_W`` then interpolate there under velocity/acceleration caps,
+        publishing each frame. Use for visibly smooth moves (demos, presenting)."""
+        q0 = self.joint_positions()
+        q_goal, ok = self._ik.solve(np.asarray(p_W, dtype=float), q0, self._grasp_offset)
+        q_goal[self._ik.gripper_index] = q0[self._ik.gripper_index]
+        self._ramp_to(q_goal, dt, max_speed, max_accel)
+        return ok
+
+    def _ramp_to(self, q_goal: np.ndarray, dt: float, max_speed: float,
+                 max_accel: float) -> None:
+        """Interpolate joints to ``q_goal`` with trapezoidal velocity limiting
+        (caps speed and acceleration), publishing each step."""
+        q = self.joint_positions().astype(float)
+        q_goal = np.asarray(q_goal, dtype=float)
+        vel = np.zeros_like(q)
+        max_dv = max_accel * dt
+        guard = 0
+        while guard < 2000:
+            guard += 1
+            err = q_goal - q
+            if np.all(np.abs(err) <= 1e-4) and np.all(np.abs(vel) <= 1e-4):
+                break
+            desired_v = np.clip(err / dt, -max_speed, max_speed)
+            # Decelerate near the goal so we stop cleanly (no overshoot).
+            stop_v = np.sign(err) * np.sqrt(np.maximum(2 * max_accel * np.abs(err), 0.0))
+            desired_v = np.clip(desired_v, -np.abs(stop_v), np.abs(stop_v))
+            dv = np.clip(desired_v - vel, -max_dv, max_dv)
+            vel = np.clip(vel + dv, -max_speed, max_speed)
+            q = q + vel * dt
+            self.plant.SetPositions(self.plant_context, self.arm, q)
+            self._update_held()
+            self.publish(dt)
 
     def set_gripper(self, closedness: float) -> None:
         """0 = fully open, 1 = closed on an item."""
@@ -242,6 +295,131 @@ class Station:
 
     # ------------------------------------------------------------------ scanning
 
+    # ------------------------------------------------------------------ camera rig
+
+    def camera_names(self) -> list[str]:
+        return list(self.cameras.keys())
+
+    def _require_cam(self, name: str | None):
+        if not self.cameras:
+            return None
+        if name is None:
+            name = next(iter(self.cameras))
+        return self.cameras.get(name)
+
+    def camera_model(self, name: str | None = None):
+        """`CameraModel` (intrinsics + live world pose) for a rig camera."""
+        from pantrysort.sim.camera import camera_model_from_sensor
+
+        cam = self._require_cam(name)
+        return None if cam is None else camera_model_from_sensor(cam, self.context)
+
+    def camera_rgb(self, name: str | None = None) -> np.ndarray | None:
+        """Undistorted (pinhole) RGBA frame from a rig camera."""
+        cam = self._require_cam(name)
+        if cam is None:
+            return None
+        ctx = cam.GetMyContextFromRoot(self.context)
+        return np.array(cam.color_image_output_port().Eval(ctx).data, copy=True)
+
+    def camera_depth(self, name: str | None = None) -> np.ndarray | None:
+        """Depth (float32, meters) frame from a rig camera."""
+        cam = self._require_cam(name)
+        if cam is None:
+            return None
+        ctx = cam.GetMyContextFromRoot(self.context)
+        return np.array(cam.depth_image_32F_output_port().Eval(ctx).data, copy=True)
+
+    def camera_fisheye(self, name: str | None = None) -> np.ndarray | None:
+        """Fisheye-distorted RGBA frame (cosmetic; for a perception policy)."""
+        from pantrysort.sim.camera import apply_fisheye
+
+        rgb = self.camera_rgb(name)
+        if rgb is None:
+            return None
+        return apply_fisheye(rgb, self.camera_model(name))
+
+    def locate_pixel(self, u: float, v: float, name: str | None = None) -> np.ndarray | None:
+        """Back-project pixel (u, v) in camera `name` to a world point via depth."""
+        model = self.camera_model(name)
+        depth = self.camera_depth(name)
+        if model is None or depth is None:
+            return None
+        row, col = int(round(v)), int(round(u))
+        if not (0 <= row < depth.shape[0] and 0 <= col < depth.shape[1]):
+            return None
+        d = float(np.asarray(depth[row, col]).reshape(-1)[0])
+        if not np.isfinite(d) or d <= 0:
+            return None
+        return model.pixel_to_world(u, v, d)
+
+    def qr_locator(self, name: str | None = None):
+        """A `Locator` for `QrClassifierBackend`: decoded QR -> world point.
+
+        Back-projects the QR's pixel center through camera `name`'s depth.
+        Falls back to the intake centroid if depth is missing so the pipeline
+        still proceeds. This is the seam that lets perception drive the arm from
+        camera data instead of ground-truth scene coordinates.
+        """
+
+        def _locate(decoded) -> tuple[float, float, float]:
+            u, v = decoded.center_px
+            p = self.locate_pixel(u, v, name)
+            if p is None:
+                return (0.22, 0.0, 0.03)
+            return (float(p[0]), float(p[1]), float(p[2]))
+
+        return _locate
+
+    def camera_views(self):
+        """Build a `CameraView` per rig camera (frame + pixel->world locator).
+
+        The locator closes over each camera's name so back-projection uses that
+        camera's own depth and pose.
+        """
+        from pantrysort.perception.identify import CameraView
+
+        views = []
+        for name in self.camera_names():
+            frame = self.camera_rgb(name)
+            if frame is None:
+                continue
+            spec = self.camera_specs.get(name)
+            watch = np.asarray(spec.look_at, dtype=float) if spec is not None else None
+            views.append(
+                CameraView(
+                    name=name,
+                    image=frame,
+                    locate=(lambda u, v, n=name: self.locate_pixel(u, v, n)),
+                    watch=watch,
+                )
+            )
+        return views
+
+    def identify_items(self, max_dist: float = 0.06):
+        """Fuse QR reads across all rig cameras into {item_label: IdentifiedItem}.
+
+        Each decoded QR is back-projected to world and matched to the nearest
+        scene item (within `max_dist`), then fused by majority vote across
+        cameras for robustness to the odd misread.
+        """
+        from pantrysort.perception.identify import identify
+
+        positions = {
+            item.label: np.asarray(self.scene_item_position(item.label), dtype=float)
+            for item in self.scene.items
+        }
+        return identify(self.camera_views(), positions, max_dist=max_dist)
+
+    def scene_item_position(self, label: str):
+        """Live world position of an item body (falls back to its scene pose)."""
+        body = self.item_bodies.get(label)
+        if body is None:
+            for it in self.scene.items:
+                if it.label == label:
+                    return np.asarray(it.position, dtype=float)
+            return np.zeros(3)
+        return np.asarray(self._body_pose(body).translation(), dtype=float)
     def scanner_image(self) -> np.ndarray | None:
         """Current RGBA frame from the gripper's QR scanner camera."""
         if self.scanner is None:
@@ -280,6 +458,8 @@ class Station:
         ctx = self.context
         ctx.SetTime(ctx.get_time() + dt)
         self.diagram.ForcedPublish(ctx)
+        for hook in self.frame_hooks:
+            hook(self)
         if self.meshcat is not None and self.realtime_rate > 0:
             time.sleep(dt / self.realtime_rate)
 
@@ -519,6 +699,14 @@ def build_station(
 
     plant.Finalize()
     scanner = _add_scanner(builder, plant, scene_graph) if config.qr_scanner else None
+    cameras: dict[str, Any] = {}
+    camera_specs: dict[str, Any] = {}
+    if getattr(config, "overhead_camera", True):
+        from pantrysort.sim.camera import add_rig, default_rig
+
+        specs = default_rig()
+        cameras = add_rig(builder, plant, scene_graph, specs)
+        camera_specs = {s.name: s for s in specs}
 
     meshcat = None
     if config.meshcat:
@@ -553,6 +741,8 @@ def build_station(
         item_shapes={item.label: item.shape for item in scene.items},
         realtime_rate=config.realtime_rate,
         scanner=scanner,
+        cameras=cameras,
+        camera_specs=camera_specs,
         _asset_dir=asset_dir,
         _ik=_ArmIK(),
     )
@@ -574,6 +764,16 @@ def build_station(
     diagram.ForcedPublish(station.context)
     return station
 
+
+def _clamp_joint_step(q_from, q_to, max_step, gripper_index=None):
+    """Limit |q_to - q_from| per joint to `max_step` rad (gripper exempt)."""
+    q_from = np.asarray(q_from, dtype=float)
+    q_to = np.asarray(q_to, dtype=float)
+    dq = np.clip(q_to - q_from, -max_step, max_step)
+    out = q_from + dq
+    if gripper_index is not None:
+        out[gripper_index] = q_to[gripper_index]  # jaw commands are not rate-limited
+    return out
 
 def _safe_name(label: str) -> str:
     return "item_" + "".join(c if c.isalnum() else "_" for c in label).strip("_").lower()
@@ -600,7 +800,12 @@ def _register_item_geometry(plant, body, shape: ItemShape, name: str, color) -> 
 
 
 def _register_qr_sticker(plant, body, item, name: str, out_dir: Path) -> None:
-    """Visual-only QR sticker on top of the item (seen by Meshcat and the scanner)."""
+    """Visual QR stickers on two opposite SIDE faces of the item (+x and -x).
+
+    Items are placed facing the arm, so one side faces the base-side cameras and
+    the other faces the far-side camera; putting a sticker on both means at least
+    one is visible to a decodable (narrow-FOV) camera from some viewpoint.
+    """
     from pydrake.geometry import (
         GeometryInstance,
         IllustrationProperties,
@@ -608,20 +813,29 @@ def _register_qr_sticker(plant, body, item, name: str, out_dir: Path) -> None:
         PerceptionProperties,
         RenderLabel,
     )
-    from pydrake.math import RigidTransform
+    from pydrake.math import RigidTransform, RotationMatrix
 
     from pantrysort.sim.scan_display import LABEL_LIFT, label_size, write_qr_label_mesh
 
     size = item.shape.size
-    obj = write_qr_label_mesh(item.qr, out_dir, f"{name}_qr", label_size(size))
-    instance = GeometryInstance(RigidTransform([0.0, 0.0, size[2] / 2 + LABEL_LIFT]),
-                                Mesh(str(obj)), f"{name}_qr_visual")
-    # No diffuse color: both Meshcat and VTK then use the OBJ's texture.
-    instance.set_illustration_properties(IllustrationProperties())
-    perception = PerceptionProperties()
-    perception.AddProperty("label", "id", RenderLabel(int(body.index())))
-    instance.set_perception_properties(perception)
-    plant.RegisterVisualGeometry(body, instance)
+    side = min(label_size((size[0], size[2], size[2])), 0.9 * min(size[0], size[2]))
+    obj = write_qr_label_mesh(item.qr, out_dir, f"{name}_qr", side)
+
+    # A quad faces +z in its own frame. Rotate +/-90 deg about y so its normal
+    # points along +x / -x, and shift it onto that face.
+    faces = {
+        "px": RigidTransform(RotationMatrix.MakeYRotation(np.pi / 2),
+                             [size[0] / 2 + LABEL_LIFT, 0.0, 0.0]),
+        "nx": RigidTransform(RotationMatrix.MakeYRotation(-np.pi / 2),
+                             [-size[0] / 2 - LABEL_LIFT, 0.0, 0.0]),
+    }
+    for tag, X_sticker in faces.items():
+        instance = GeometryInstance(X_sticker, Mesh(str(obj)), f"{name}_qr_{tag}_visual")
+        instance.set_illustration_properties(IllustrationProperties())
+        perception = PerceptionProperties()
+        perception.AddProperty("label", "id", RenderLabel(int(body.index())))
+        instance.set_perception_properties(perception)
+        plant.RegisterVisualGeometry(body, instance)
 
 
 def _add_ground_and_fixtures(plant, scene: PantryScene) -> None:

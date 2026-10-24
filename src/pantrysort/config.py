@@ -30,6 +30,8 @@ class SimConfig:
     meshcat: bool = _get_bool("PANTRYSORT_MESHCAT", True)
     # Render a gripper camera and identify items by decoding their QR stickers.
     qr_scanner: bool = _get_bool("PANTRYSORT_QR_SCANNER", True)
+    # Add a wide-FOV overhead camera (fisheye-approximated) for localization.
+    overhead_camera: bool = _get_bool("PANTRYSORT_OVERHEAD_CAMERA", True)
 
 
 @dataclass(frozen=True)
