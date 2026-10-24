@@ -29,6 +29,46 @@ class FoodCategory(str, Enum):
     NON_FOOD = "non_food"            # hygiene, pet, etc.
     UNKNOWN = "unknown"
 
+    # Shelf categories shown in the Stash app. The values above are the robot's
+    # sorting categories (also printed on QR labels); app_category() maps them.
+    PROTEIN = "protein"
+    GRAINS = "grains"
+    FRUIT_VEG = "fruit_veg"
+    COOKING_BASICS = "cooking_basics"
+    FAMILY_KIDS = "family_kids"
+    DRINKS = "drinks"
+    PERSONAL_CARE = "personal_care"
+    HOUSEHOLD = "household"
+
+
+_APP_CATEGORY = {
+    FoodCategory.CANNED: FoodCategory.PROTEIN,
+    FoodCategory.DRY_GOODS: FoodCategory.GRAINS,
+    FoodCategory.BAKERY: FoodCategory.GRAINS,
+    FoodCategory.PRODUCE: FoodCategory.FRUIT_VEG,
+    FoodCategory.FROZEN: FoodCategory.FRUIT_VEG,
+    FoodCategory.DAIRY: FoodCategory.FAMILY_KIDS,
+    FoodCategory.BEVERAGE: FoodCategory.DRINKS,
+    FoodCategory.SNACK: FoodCategory.FAMILY_KIDS,
+    FoodCategory.CONDIMENT: FoodCategory.COOKING_BASICS,
+    FoodCategory.NON_FOOD: FoodCategory.HOUSEHOLD,
+    # UNKNOWN stays "unknown": the app shows it as Unsorted with the unknown picture.
+}
+
+_PROTEIN_WORDS = ("peanut butter", "almond butter", "nut butter")
+_PERSONAL_CARE_WORDS = ("toothpaste", "toothbrush", "soap", "shampoo", "conditioner",
+                        "deodorant", "body wash")
+
+
+def app_category(category: FoodCategory, name: str = "") -> FoodCategory:
+    """Map a robot sorting category to the app's shelf category."""
+    lowered = name.lower()
+    if category == FoodCategory.CONDIMENT and any(w in lowered for w in _PROTEIN_WORDS):
+        return FoodCategory.PROTEIN
+    if category == FoodCategory.NON_FOOD and any(w in lowered for w in _PERSONAL_CARE_WORDS):
+        return FoodCategory.PERSONAL_CARE
+    return _APP_CATEGORY.get(category, category)
+
 
 class StorageType(str, Enum):
     SHELF = "shelf"
