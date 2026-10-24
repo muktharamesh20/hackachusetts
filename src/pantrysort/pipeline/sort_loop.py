@@ -61,6 +61,7 @@ class ScanOutcome:
     image: np.ndarray | None = None
     corners: np.ndarray | None = None
     source: str = "ground-truth"  # "camera" when decoded from the rendered frame
+    held: bool = False  # True if the arm is already holding this item (from active scan)
 
 
 @dataclass
@@ -172,7 +173,8 @@ class SortLoop:
 
         # Drive the robot to move the item, if a station is available.
         if station is not None:
-            self._pick_and_place(station, scene_item, detection, location.id)
+            self._pick_and_place(station, scene_item, detection, location.id,
+                                 already_held=scan.held)
 
         item = detection.to_item()
         item.location_id = location.id
@@ -239,7 +241,7 @@ class SortLoop:
         # held item is (so a different item's sticker can't be misattributed).
         from pantrysort.sim.active_scan import present_and_read
 
-        active = present_and_read(station, scene_item.label)
+        active = present_and_read(station, scene_item.label, keep_held=True)
         if active is not None:
             text, image, cam = active
             try:
@@ -249,8 +251,8 @@ class SortLoop:
                                scene_item.label, exc)
             else:
                 det = detection_from_payload(payload, self._catalog, scene_item.position, today)
-                logger.info("Identified %-22s by presenting to %s", scene_item.label, cam)
-                return ScanOutcome(det, payload, text, image, source="camera-active")
+                logger.info("Identified %-22s by presenting to %s (now held)", scene_item.label, cam)
+                return ScanOutcome(det, payload, text, image, source="camera-active", held=True)
 
         logger.warning("No camera read a QR for %s; sending to the misc bin.",
                        scene_item.label)
@@ -294,7 +296,7 @@ class SortLoop:
     # ------------------------------------------------------------------ motion
 
     def _pick_and_place(self, station, scene_item: SceneItem, detection: Detection,
-                        location_id: str) -> None:
+                        location_id: str, already_held: bool = False) -> None:
         from pantrysort.sim.pick_and_place import execute_pick_and_place
 
         shape = scene_item.shape
@@ -307,6 +309,7 @@ class SortLoop:
             drop_position=np.asarray(drop, dtype=float),
             grasp_width=shape.grip_width,
             drop_yaw=yaw,
+            already_held=already_held,
         )
 
     def _log_report(self) -> None:

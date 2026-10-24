@@ -67,7 +67,7 @@ PRESENT_DISTANCES = (0.14, 0.18, 0.12, 0.16)  # tried in order; first reachable 
 
 
 def present_and_read(station, item_label: str, dt: float = 0.05, hold_frames: int = SETTLE_FRAMES,
-                     on_capture=None, cameras=None):
+                     on_capture=None, cameras=None, keep_held: bool = False):
     """Grasp `item_label`, present it to each camera, and decode its QR.
 
     Motion uses the velocity/acceleration-limited `move_ee_to_smooth` so the
@@ -100,7 +100,8 @@ def present_and_read(station, item_label: str, dt: float = 0.05, hold_frames: in
     if grabbed is None:
         logger.debug("present_and_read: failed to grasp %s", item_label)
         station.detach()
-        station.plant.SetFreeBodyPose(station.plant_context, body, X_orig)
+        station.set_gripper(0.0)
+        station.publish(dt)
         return None
 
     names = cameras if cameras is not None else station.camera_names()
@@ -126,12 +127,34 @@ def present_and_read(station, item_label: str, dt: float = 0.05, hold_frames: in
             result = hit
             break
 
-    # Return the item to its slot and release.
-    station.detach()
-    station.plant.SetFreeBodyPose(station.plant_context, body, X_orig)
-    station.set_gripper(0.0)
-    station.publish(dt)
+    if result is not None and keep_held:
+        # Leave the item grasped so the caller can place it directly: no
+        # teleport, no redundant re-grasp. The arm holds it at the camera.
+        return result
+
+    # Otherwise set the item back down near where it came from and release. We
+    # move it there with the arm (so it glides, never teleports), then open the
+    # gripper. If the grasp had failed, the item never moved, so just release.
+    if station.holding:
+        _lower_and_release(station, np.asarray(X_orig.translation(), dtype=float), dt)
+    else:
+        station.set_gripper(0.0)
+        station.publish(dt)
     return result
+
+
+def _lower_and_release(station, home, dt: float, steps: int = 16) -> None:
+    """Glide the held item back to ``home`` and gently set it down (no teleport)."""
+    above = np.asarray(home, dtype=float) + np.array([0.0, 0.0, 0.05])
+    for _ in range(steps):
+        ee = station.ee_position()
+        step = ee + 0.3 * (above - ee)
+        station.move_ee_to(step)
+        station.publish(dt)
+    station.drop_held_onto(np.asarray(home, dtype=float), dt, yaw=None)
+    for _ in range(4):
+        station.set_gripper(0.0)
+        station.publish(dt)
 
 
 def _reachable(station, p_world, tol: float = 0.05) -> bool:

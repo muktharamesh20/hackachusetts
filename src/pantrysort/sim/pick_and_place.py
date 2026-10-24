@@ -32,6 +32,7 @@ def execute_pick_and_place(
     dt: float = 0.05,
     grasp_width: float | None = None,
     drop_yaw: float | None = None,
+    already_held: bool = False,
 ) -> bool:
     """Run the policy until it reports ``done`` or ``max_steps`` elapses.
 
@@ -44,6 +45,11 @@ def execute_pick_and_place(
     if grasp_width is not None:
         station.prepare_grasp(grasp_width)
     drop_position = np.asarray(drop_position, dtype=float)
+
+    if already_held and station.holding:
+        # The arm already holds this item (it was lifted to a camera to be read).
+        # Skip approach/grasp: carry it to the bin and set it down with no spin.
+        return _transport_and_drop(station, drop_position, drop_yaw, dt)
     gripper = 0.0
     done = False
     steps = 0
@@ -160,6 +166,56 @@ def scan_item_rig(station, dt: float = 0.05) -> ScanReading:
                                                      c.center_px[1] - h / 2))
             return ScanReading(frame, best)
     return ScanReading(image)
+
+RELEASE_STEPS = 10   # frames to lower a held item toward the surface
+LOWER_RATE = 0.35    # fraction of remaining descent per frame
+
+
+def _step_toward(cur: np.ndarray, target: np.ndarray, rate: float) -> np.ndarray:
+    cur = np.asarray(cur, dtype=float)
+    return cur + rate * (np.asarray(target, dtype=float) - cur)
+
+
+def _transport_and_drop(station, drop_position: np.ndarray, drop_yaw, dt: float,
+                        steps: int = 24) -> bool:
+    """Carry an already-held item to `drop_position` and set it down (no spin).
+
+    Swings around the base to the drop point while the wrist turns the item to
+    `drop_yaw`, then releases with the kinematic no-spin drop. Used when the
+    item was grasped during active scanning, so there is no approach/grasp.
+    """
+    drop_position = np.asarray(drop_position, dtype=float)
+    rel = _wrap_full_turn(station.jaw_heading() - _sideways(station.ee_position()))
+    if drop_yaw is not None:
+        held_offset = station.held_item_yaw() - station.jaw_heading()
+        rel_target = _choose_turn(station, rel,
+                                  drop_yaw - held_offset - _sideways(drop_position))
+    else:
+        rel_target = rel
+
+    # Carry to a hover over the drop, turning the item to its drop yaw en route.
+    hover = drop_position + np.array([0.0, 0.0, 0.08])
+    for _ in range(steps):
+        ee = station.ee_position()
+        rel += WRIST_RATE * (rel_target - rel)
+        step = _step_around_base(ee, hover, TRACK_RATE)
+        station.move_ee_to(step, jaw_heading=_sideways(step) + rel)
+        station.publish(dt)
+
+    # Lower the held item to just above the surface so the release is a short,
+    # gentle set-down rather than a drop from height.
+    release = drop_position + np.array([0.0, 0.0, 0.015])
+    for _ in range(RELEASE_STEPS):
+        ee = station.ee_position()
+        step = _step_toward(ee, release, LOWER_RATE)
+        station.move_ee_to(step, jaw_heading=_sideways(step) + rel)
+        station.publish(dt)
+
+    station.drop_held_onto(drop_position, dt, yaw=None)
+    for _ in range(4):
+        station.set_gripper(0.0)
+        station.publish(dt)
+    return True
 
 def _sideways(p: np.ndarray) -> float:
     """Default jaw heading at ``p``: tangent to the arm's reach direction."""
