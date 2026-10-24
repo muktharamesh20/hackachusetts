@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 def _get_bool(key: str, default: bool) -> bool:
@@ -59,10 +59,24 @@ class InventoryConfig:
 
 
 @dataclass(frozen=True)
+class YoloConfig:
+    # Shadow-mode YOLOX detector: observes identifications, never changes them.
+    # On by default; it only runs if onnxruntime and the weights are available.
+    enabled: bool = _get_bool("PANTRYSORT_YOLO", True)
+    model: str = os.getenv("PANTRYSORT_YOLO_MODEL", "yolox_s")  # or "yolox_nano"
+    cache_dir: str = os.getenv("PANTRYSORT_YOLO_CACHE", "~/.cache/pantrysort/yolox")
+    # Download the pinned weights on first use if they are missing.
+    download: bool = _get_bool("PANTRYSORT_YOLO_DOWNLOAD", False)
+    score_thr: float = _get_float("PANTRYSORT_YOLO_SCORE_THR", 0.25)
+    nms_thr: float = _get_float("PANTRYSORT_YOLO_NMS_THR", 0.45)
+
+
+@dataclass(frozen=True)
 class Config:
     sim: SimConfig
     policy: PolicyConfig
     inventory: InventoryConfig
+    yolo: YoloConfig = field(default_factory=YoloConfig)
     log_level: str = os.getenv("PANTRYSORT_LOG_LEVEL", "INFO")
 
     @classmethod
@@ -71,6 +85,7 @@ class Config:
             sim=SimConfig(),
             policy=PolicyConfig(),
             inventory=InventoryConfig(),
+            yolo=YoloConfig(),
         )
 
 

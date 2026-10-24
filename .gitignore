@@ -32,6 +32,8 @@ wandb/
 *.ckpt
 *.pt
 *.safetensors
+# YOLOX weights (normally kept in ~/.cache/pantrysort/yolox/)
+*.onnx
 
 # Drake / sim artifacts
 *.html

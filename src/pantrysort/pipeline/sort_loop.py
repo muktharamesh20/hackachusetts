@@ -23,7 +23,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
+from pathlib import Path
 
 import numpy as np
 
@@ -39,6 +40,7 @@ from pantrysort.inventory.models import (
 from pantrysort.perception.catalog import FoodCatalog
 from pantrysort.perception.classifier import Detection
 from pantrysort.perception.qr_payload import FoodQrPayload, PayloadError
+from pantrysort.perception.yolo import YoloShadowTracker, make_detector
 from pantrysort.policy.lerobot_policy import Policy, make_policy
 from pantrysort.sim.pantry_scene import (
     DISCARD_LOCATION_ID,
@@ -62,6 +64,7 @@ class ScanOutcome:
     corners: np.ndarray | None = None
     source: str = "ground-truth"  # "camera" when decoded from the rendered frame
     held: bool = False  # True if the arm is already holding this item (from active scan)
+    cameras: tuple[str, ...] = ()  # rig cameras whose frames identified the item
 
 
 @dataclass
@@ -72,6 +75,9 @@ class SortResult:
     scans: list[ScanOutcome] = field(default_factory=list)
     # Per donation box: (label, {destination location id: item count}).
     boxes: list[tuple[str, dict[str, int]]] = field(default_factory=list)
+    # YOLO shadow-detector observations + summary (None when no detector ran).
+    yolo: YoloShadowTracker | None = None
+    yolo_dir: Path | None = None
 
     @property
     def num_sorted(self) -> int:
@@ -86,7 +92,12 @@ class SortLoop:
         policy: Policy | None = None,
         config: Config = CONFIG,
         use_sim: bool = True,
+        detector: object | None = "auto",
+        yolo_out_root: str | Path = "outputs/yolo",
     ) -> None:
+        """``detector``: YOLO shadow detector. ``"auto"`` builds one from config
+        (None if unavailable), ``None`` disables it, or pass any object with
+        ``detect(image)``. It only records; it never affects sorting."""
         self.config = config
         self.scene = scene or scene_for_mode(getattr(config.sim, "scene_mode", "flat_grid"))
         self.store = store or make_store(locations=self.scene.locations, config=config)
@@ -97,6 +108,9 @@ class SortLoop:
         )
         self.use_sim = use_sim
         self._station = None
+        self._detector = detector
+        self._yolo_out_root = Path(yolo_out_root)
+        self._yolo: YoloShadowTracker | None = None
 
     def _maybe_build_station(self):
         if not self.use_sim:
@@ -125,10 +139,12 @@ class SortLoop:
         # Identify every item once up front by fusing QR reads across all rig
         # cameras (match each decoded QR to the nearest item, vote across views).
         self._identifications = {}
+        self._yolo = None
         if station is not None and getattr(station, "cameras", None):
             self._identifications = station.identify_items()
             logger.info("Camera rig identified %d/%d items.",
                         len(self._identifications), len(self.scene.items))
+            self._yolo = self._make_yolo_tracker()
 
         if self.scene.boxes:
             for k, box in enumerate(self.scene.boxes):
@@ -156,13 +172,59 @@ class SortLoop:
         if station is not None:
             station.finish_recording()
         self._log_report()
+        self._finish_yolo(result)
         return result
+
+    # ------------------------------------------------------------------ YOLO shadow
+
+    def _make_yolo_tracker(self) -> YoloShadowTracker | None:
+        try:
+            det = make_detector(self.config) if self._detector == "auto" else self._detector
+        except Exception as exc:
+            logger.warning("YOLO shadow detector unavailable (%s).", exc)
+            det = None
+        return YoloShadowTracker(det) if det is not None else None
+
+    def _shadow_observe(self, station, scene_item: SceneItem, scan: ScanOutcome) -> None:
+        """Run YOLO on the frame(s) that identified this item. Observation only:
+        nothing here may touch ``scan`` or routing, and errors are swallowed."""
+        if self._yolo is None or scan.payload is None or not scan.cameras:
+            return
+        try:
+            positions = {it.label: np.asarray(station.scene_item_position(it.label), dtype=float)
+                         for it in self.scene.items}
+            for k, cam in enumerate(scan.cameras):
+                image = scan.image if k == 0 and scan.image is not None else station.camera_rgb(cam)
+                if image is None:
+                    continue
+                self._yolo.observe(
+                    scene_item.label, scene_item.barcode, cam, image,
+                    locate=(lambda u, v, n=cam: station.locate_pixel(u, v, n)),
+                    positions=positions, source=scan.source,
+                )
+        except Exception as exc:  # shadow mode must never break sorting
+            logger.warning("YOLO shadow observation failed for %s (%s); ignoring.",
+                           scene_item.label, exc)
+
+    def _finish_yolo(self, result: SortResult) -> None:
+        if self._yolo is None:
+            return
+        try:
+            logger.info(self._yolo.summary_line())
+            out = self._yolo_out_root / datetime.now().strftime("%Y%m%d-%H%M%S")
+            result.yolo_dir = self._yolo.write(out)
+            result.yolo = self._yolo
+            logger.info("YOLO shadow observations written to %s", out)
+        except Exception as exc:
+            logger.warning("Could not write YOLO shadow results (%s).", exc)
+            result.yolo = self._yolo
 
     def _process(self, station, scene_item: SceneItem, today: date,
                  result: SortResult) -> str | None:
         """Scan, route, move, and record one item. Returns its destination id."""
         scan = self._identify(station, scene_item, today)
         result.scans.append(scan)
+        self._shadow_observe(station, scene_item, scan)
         detection = scan.detection
         location = self.route(detection, today)
         self._show_scan(station, scan, location, today)
@@ -233,7 +295,8 @@ class SortLoop:
                 logger.info("Identified %-22s via %s (votes %d/%d)", scene_item.label,
                             ",".join(ident.cameras), ident.votes, ident.total_reads)
                 image = station.camera_rgb(ident.cameras[0]) if ident.cameras else None
-                return ScanOutcome(det, payload, ident.text, image, source="camera")
+                return ScanOutcome(det, payload, ident.text, image, source="camera",
+                                   cameras=tuple(ident.cameras))
 
         # Passive fusion missed this item: actively present it to a camera. The
         # arm lifts the item to a reachable lens, where its QR is large and
@@ -252,7 +315,8 @@ class SortLoop:
             else:
                 det = detection_from_payload(payload, self._catalog, scene_item.position, today)
                 logger.info("Identified %-22s by presenting to %s (now held)", scene_item.label, cam)
-                return ScanOutcome(det, payload, text, image, source="camera-active", held=True)
+                return ScanOutcome(det, payload, text, image, source="camera-active", held=True,
+                                   cameras=(cam,))
 
         logger.warning("No camera read a QR for %s; sending to the misc bin.",
                        scene_item.label)

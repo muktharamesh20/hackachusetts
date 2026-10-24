@@ -244,6 +244,28 @@ drift under 1 cm, at most 0.06 m); an isolated item is not lifted.
 
 **Validates: Requirements 5.1, 5.2**
 
+## Revision: YOLOX shadow detection
+
+- `perception/yolo.py`: `YoloxDetector` wraps a pretrained YOLOX (Apache-2.0)
+  COCO ONNX model in onnxruntime (CPU). Preprocess: letterbox to the model input,
+  BGR, no normalization (YOLOX convention). Postprocess: decode grid/stride
+  outputs, score = obj * cls, class-wise NMS. Weights live in a user cache dir,
+  pinned by URL + SHA-256. `make_detector()` returns None when unavailable or
+  disabled (`PANTRYSORT_YOLO`).
+- `YoloShadowTracker` observes each identification: runs the detector on the
+  identifying camera frame, maps detections to world via `station.locate_pixel`
+  on the box center, matches the nearest item, and compares the top class with
+  the item's expected COCO class from a mapping table (None = unmappable).
+- `SortLoop` calls the tracker after `_identify`; the tracker only records.
+  Results go to `SortResult.yolo` and `outputs/yolo/<timestamp>/`.
+- No training or fine-tuning. The capability report lives in `docs/yolo_report.md`.
+
+### Property 11: YOLO never overrides QR
+For any detector output (including always-wrong predictions), the sort loop's
+identifications, routes and inventory are identical to a run without the
+detector.
+
+**Validates: Requirements 6.3, 6.5**
 ## Boundary with the pantry app and Supabase
 
 This design ends at a verified item placement and a structured sort result. The
