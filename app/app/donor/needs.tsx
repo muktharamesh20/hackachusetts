@@ -1,5 +1,6 @@
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { RefreshControl, Share, StyleSheet, Text, View } from "react-native";
+import { Pressable, RefreshControl, Share, StyleSheet, Text, View } from "react-native";
 import { Art, Button, Card, CategoryIcon, EmptyState, ErrorText, Meter, Screen } from "@/components/ui";
 import { computeNeeds, Need } from "@/lib/needs";
 import { fetchCategoryStock, fetchPantries } from "@/lib/stash";
@@ -46,14 +47,24 @@ export default function Needs() {
           <View style={styles.actions}>
             <Button
               title="Give $"
+              icon="hand-heart"
               color={ModeColors.donor.main}
               dark={ModeColors.donor.dark}
-              style={{ flex: 1 }}
+              style={styles.action}
               onPress={() => router.push({ pathname: "/donor/give", params: { pantry: n.pantry.id, category: n.category.key } })}
             />
-            <Button title="Share" variant="outline" icon="share-variant-outline" color={Colors.sky} style={{ flex: 1 }} onPress={() => shareNeed(n)} />
+            <Button
+              title="Drop food"
+              icon="barcode-scan"
+              variant="outline"
+              color={ModeColors.donor.main}
+              style={styles.action}
+              onPress={() => router.push({ pathname: "/donor/scan", params: { pantry: n.pantry.id } })}
+            />
+            <Pressable style={styles.shareBtn} onPress={() => shareNeed(n)} hitSlop={6} accessibilityLabel="Share">
+              <MaterialCommunityIcons name="share-variant-outline" size={22} color={Colors.sky} />
+            </Pressable>
           </View>
-          <Text style={styles.link} onPress={() => router.push(`/pantries/${n.pantry.id}`)}>Drop off food here</Text>
         </Card>
       ))}
     </Screen>
@@ -63,6 +74,11 @@ export default function Needs() {
 const styles = StyleSheet.create({
   hero: { flexDirection: "row", alignItems: "center", gap: Space.md },
   top: { flexDirection: "row", alignItems: "center", gap: 12 },
-  actions: { flexDirection: "row", gap: 10 },
+  actions: { flexDirection: "row", gap: 8, alignItems: "stretch" },
+  action: { flex: 1, paddingHorizontal: 10 },
+  shareBtn: {
+    width: 52, borderRadius: 16, backgroundColor: Colors.card, borderWidth: 1.5, borderBottomWidth: 3,
+    borderColor: Colors.line, alignItems: "center", justifyContent: "center",
+  },
   link: { ...Type.h3, fontSize: 14, color: Colors.sky, textAlign: "center" },
 });

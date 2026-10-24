@@ -10,7 +10,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Art, Button, CategoryIcon, Chip, ErrorText } from "@/components/ui";
 import { CATEGORIES, CategoryKey } from "@/lib/categories";
 import { parseLabel } from "@/lib/qr";
-import { findCatalogItem, findItemByBarcode } from "@/lib/stash";
+import { findCatalogItem, findItemByBarcode, rememberCode } from "@/lib/stash";
 import { Colors } from "@/theme/colors";
 import { Fonts, Radii, Space, Type } from "@/theme/type";
 
@@ -21,6 +21,7 @@ export type ScanDraft = {
   quantity: number;
   expirationDate: string; // YYYY-MM-DD or ""
   known: boolean; // matches an item already in this pantry
+  inCatalog: boolean; // the code is already in the shared product catalog
 };
 
 type Draft = ScanDraft;
@@ -28,19 +29,23 @@ type Draft = ScanDraft;
 /** What the success sheet says after a submit. */
 export type ScanDone = { title: string; body: string };
 
-const EMPTY: Draft = { barcode: null, name: "", category: null, quantity: 1, expirationDate: "", known: false };
+const EMPTY: Draft = {
+  barcode: null, name: "", category: null, quantity: 1, expirationDate: "", known: false, inCatalog: false,
+};
 
 /**
  * Camera + QR/barcode lookup + item form, shared by staff and donor scanning.
  * `onSubmit` decides what saving means; return null to go straight back to the
  * camera (e.g. a donor adding to their bag), or a message for the success sheet.
  */
-export function ScanFlow({ pantryId, submitLabel, submitIcon = "package-variant-closed", onSubmit, topSlot, bottomSlot, idleTitle }: {
+export function ScanFlow({ pantryId, submitLabel, submitIcon = "package-variant-closed", onSubmit, onCode, topSlot, bottomSlot, idleTitle }: {
   /** Pantry to match scanned codes against existing items (null: skip). */
   pantryId: string | null;
   submitLabel: string;
   submitIcon?: React.ComponentProps<typeof Button>["icon"];
   onSubmit: (draft: ScanDraft) => Promise<ScanDone | null>;
+  /** Handle special codes (e.g. a drop-off slip) before the item form; return true if handled. */
+  onCode?: (code: string) => boolean;
   /** Shown under the hint while the camera is up (e.g. a pantry picker). */
   topSlot?: ReactNode;
   /** Shown above "Type it in instead" while the camera is up (e.g. a bag bar). */
@@ -60,6 +65,10 @@ export function ScanFlow({ pantryId, submitLabel, submitIcon = "package-variant-
     if (lock.current || stage !== "camera") return;
     lock.current = true;
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    if (onCode?.(data)) {
+      setTimeout(() => (lock.current = false), 1500); // don't re-fire while navigating away
+      return;
+    }
     const label = parseLabel(data);
     const [existing, known] = await Promise.all([
       pantryId ? findItemByBarcode(pantryId, label.code).catch(() => null) : null,
@@ -72,6 +81,7 @@ export function ScanFlow({ pantryId, submitLabel, submitIcon = "package-variant-
       quantity: 1,
       expirationDate: label.expirationDate ?? existing?.expiration_date ?? "",
       known: Boolean(existing),
+      inCatalog: Boolean(known),
     });
     setStage("form");
   };
@@ -88,6 +98,10 @@ export function ScanFlow({ pantryId, submitLabel, submitIcon = "package-variant-
     setError(null);
     setBusy(true);
     try {
+      // First time anyone names this code: remember it so the next scan fills in.
+      if (draft.barcode && !draft.inCatalog) {
+        rememberCode(draft.barcode, draft.name.trim(), draft.category).catch(() => {});
+      }
       const result = await onSubmit({ ...draft, name: draft.name.trim() });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       if (result) {
@@ -141,7 +155,7 @@ export function ScanFlow({ pantryId, submitLabel, submitIcon = "package-variant-
         <View style={styles.bottomBar}>
           {bottomSlot}
           <Button
-            title="Type it in instead"
+            title="No barcode? Type it in"
             variant="outline"
             icon="keyboard-outline"
             onPress={() => {
@@ -254,10 +268,11 @@ const styles = StyleSheet.create({
   },
   bottomBar: { position: "absolute", left: Space.gutter, right: Space.gutter, bottom: Space.xl, gap: Space.md },
   sheetWrap: { flex: 1, justifyContent: "flex-end" },
+  // flexGrow 0: size the sheet to its content instead of stretching to maxHeight.
   sheet: {
-    backgroundColor: Colors.bg, borderTopLeftRadius: 32, borderTopRightRadius: 32, maxHeight: "80%",
+    backgroundColor: Colors.bg, borderTopLeftRadius: 32, borderTopRightRadius: 32, maxHeight: "85%", flexGrow: 0,
   },
-  sheetContent: { padding: Space.gutter, gap: Space.md, paddingBottom: Space.xxl },
+  sheetContent: { padding: Space.gutter, gap: Space.md, paddingBottom: Space.lg },
   sheetHeader: { flexDirection: "row", alignItems: "center", gap: Space.md },
   input: {
     backgroundColor: Colors.card, borderWidth: 1.5, borderColor: Colors.line, borderRadius: 14,

@@ -176,6 +176,11 @@ export async function findCatalogItem(sku: string | null, name?: string): Promis
   return null;
 }
 
+/** Teach the shared catalog an unknown code's name (never overwrites a known code). */
+export async function rememberCode(code: string, name: string, category: string): Promise<void> {
+  await run(supabase.rpc("remember_code", { p_code: code, p_name: name, p_category: category }));
+}
+
 /** Units expiring within `days` (from the item's lots). */
 export function unitsExpiringWithin(item: Item, days: number): number {
   return (item.inventory_lots ?? []).reduce((n, l) => {
@@ -301,6 +306,8 @@ export const fetchMyDonations = () =>
 
 export type Dropoff = {
   id: number;
+  batch_id: string;
+  donor_name: string | null;
   pantry_id: string;
   name: string;
   category: string;
@@ -310,13 +317,26 @@ export type Dropoff = {
   created_at: string;
 };
 
+/** Random v4-style id for a drop-off bag (shared by its rows; printed as a QR on the slip). */
+function newBagId(): string {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
+/** Submit a donor's bag; returns the bag id for the printable slip. */
 export async function submitDropoff(
   pantryId: string,
+  donorName: string,
   items: { name: string; category: string; quantity: number; expirationDate: string | null; barcode: string | null }[],
-): Promise<void> {
+): Promise<string> {
+  const batchId = newBagId();
   await run(
     supabase.from("dropoff_items").insert(
       items.map((i) => ({
+        batch_id: batchId,
+        donor_name: donorName,
         pantry_id: pantryId,
         name: i.name,
         category: i.category,
@@ -326,13 +346,24 @@ export async function submitDropoff(
       })),
     ),
   );
+  return batchId;
 }
+
+/** One donor's bag (staff at that pantry, or the donor). */
+export const fetchDropoffBag = (batchId: string) =>
+  run<(Dropoff & { status: string })[]>(
+    supabase
+      .from("dropoff_items")
+      .select("id,batch_id,donor_name,pantry_id,name,category,quantity,expiration_date,barcode,created_at,status")
+      .eq("batch_id", batchId)
+      .order("id"),
+  );
 
 export const fetchPendingDropoffs = (pantryId: string) =>
   run<Dropoff[]>(
     supabase
       .from("dropoff_items")
-      .select("id,pantry_id,name,category,quantity,expiration_date,barcode,created_at")
+      .select("id,batch_id,donor_name,pantry_id,name,category,quantity,expiration_date,barcode,created_at")
       .eq("pantry_id", pantryId)
       .eq("status", "pending")
       .order("created_at", { ascending: false }),

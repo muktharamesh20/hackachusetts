@@ -2,7 +2,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { HeaderShownContext } from "@react-navigation/elements";
 import { useNavigation } from "@react-navigation/native";
-import { ReactNode, useContext, useRef } from "react";
+import { ReactNode, useContext, useRef, useState } from "react";
 import {
   ActivityIndicator, Image, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, ScrollViewProps, StyleProp,
   StyleSheet, Text, View, ViewStyle,
@@ -112,13 +112,26 @@ export function Art({ name, width, height, style, rounded = 16, cover = false }:
   );
 }
 
-export function CategoryIcon({ category, size = 36 }: { category: string; size?: number }) {
+/** Category art on a soft tinted circle (or bare with `plain`); vector icon if the art is missing. */
+export function CategoryIcon({ category, size = 36, plain = false }: { category: string; size?: number; plain?: boolean }) {
   const info = categoryInfo(category);
-  const src = artSource(info.art);
+  const [failed, setFailed] = useState(false);
+  const src = failed ? null : artSource(info.art);
+  if (src && plain) {
+    return <Image source={src} style={{ width: size, height: size }} resizeMode="contain" onError={() => setFailed(true)} />;
+  }
+  if (!src && plain) {
+    return <MaterialCommunityIcons name={info.icon as IconName} size={size * 0.85} color={info.tint} style={{ width: size, textAlign: "center" }} />;
+  }
   if (src) {
     return (
       <View style={[styles.catIcon, { width: size, height: size, borderRadius: size / 2, backgroundColor: info.tint + "26" }]}>
-        <Image source={src} style={{ width: size * 0.78, height: size * 0.78 }} resizeMode="contain" />
+        <Image
+          source={src}
+          style={{ width: size * 0.78, height: size * 0.78 }}
+          resizeMode="contain"
+          onError={() => setFailed(true)}
+        />
       </View>
     );
   }

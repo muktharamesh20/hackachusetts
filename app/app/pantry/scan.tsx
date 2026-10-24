@@ -1,13 +1,22 @@
+import { useRouter } from "expo-router";
 import { ScanFlow } from "@/components/ScanFlow";
 import { useStaffPantryId } from "@/context/ProfileContext";
+import { parseSlipCode } from "@/lib/slip";
 import { logItem } from "@/lib/stash";
 
-/** Staff scan: each item goes straight into this pantry's stock as a new lot. */
+/** Staff scan: items go straight into stock as new lots; drop-off slips open the donor's bag. */
 export default function Scan() {
   const pantryId = useStaffPantryId();
+  const router = useRouter();
   return (
     <ScanFlow
       pantryId={pantryId}
+      // A donor's printed drop-off slip opens that bag for check-in.
+      onCode={(code) => {
+        const batch = parseSlipCode(code);
+        if (batch) router.push(`/dropoffs/${batch}`);
+        return Boolean(batch);
+      }}
       submitLabel="Log new items"
       onSubmit={async (d) => {
         const item = await logItem({

@@ -6,7 +6,7 @@ import { Art, Card, ErrorText, Screen, StatTile } from "@/components/ui";
 import { computeNeeds, mealsPerDollar, topShortage } from "@/lib/needs";
 import { fetchCategoryStock, fetchMyDonations, fetchPantries, money } from "@/lib/stash";
 import { useLoad } from "@/lib/useLoad";
-import { Colors } from "@/theme/colors";
+import { Colors, Tint } from "@/theme/colors";
 import { Fonts, Space, Type } from "@/theme/type";
 
 const WAYS = [
@@ -53,7 +53,7 @@ export default function DonorHome() {
 
       {shortage && (
         <Card style={styles.alert} onPress={() => router.push("/donor/needs")}>
-          <MaterialCommunityIcons name="alert-circle-outline" size={30} color="#A97A12" />
+          <MaterialCommunityIcons name="alert-circle-outline" size={30} color={Tint.mustard.ink} />
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={Type.h3}>Running low on {shortage.category.label.toLowerCase()}</Text>
             <Text style={Type.muted}>
@@ -69,8 +69,10 @@ export default function DonorHome() {
         {WAYS.map((w) => (
           <Card key={w.title} style={styles.way} onPress={() => router.push(w.href)}>
             <Art name={w.art} width={72} />
-            <Text style={styles.wayTitle}>{w.title}</Text>
-            <MaterialCommunityIcons name="chevron-right" size={20} color={Colors.text} style={{ alignSelf: "flex-end" }} />
+            <View style={styles.wayRow}>
+              <Text style={styles.wayTitle}>{w.title}</Text>
+              <MaterialCommunityIcons name="chevron-right" size={20} color={Colors.text} />
+            </View>
           </Card>
         ))}
       </View>
@@ -103,16 +105,17 @@ const styles = StyleSheet.create({
   hero: { flexDirection: "row", alignItems: "center", gap: Space.md, marginTop: Space.sm },
   alert: {
     flexDirection: "row", alignItems: "center", gap: 12,
-    backgroundColor: Colors.mustardSoft, borderColor: Colors.mustardSoft,
+    backgroundColor: Tint.mustard.bg, borderColor: Tint.mustard.border,
   },
-  scanCard: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: Colors.oliveSoft, borderColor: Colors.oliveSoft },
+  scanCard: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: Tint.olive.bg, borderColor: Tint.olive.border },
   scanIcon: {
-    width: 48, height: 48, borderRadius: 16, backgroundColor: Colors.olive,
+    width: 48, height: 48, borderRadius: 16, backgroundColor: Tint.olive.ink,
     alignItems: "center", justifyContent: "center",
   },
   ways: { flexDirection: "row", gap: 10 },
   way: { flex: 1, padding: 12, gap: 6 },
-  wayTitle: { fontFamily: Fonts.display, fontSize: 15, color: Colors.text },
+  wayRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 4 },
+  wayTitle: { fontFamily: Fonts.display, fontSize: 15, color: Colors.text, flexShrink: 1 },
   share: { flexDirection: "row", alignItems: "center", gap: 12 },
   stats: { flexDirection: "row", gap: Space.sm },
 });

@@ -9,6 +9,7 @@ import { ImageSourcePropType } from "react-native";
 export const ART: Record<string, ImageSourcePropType> = {
   "cat-baby": require("@/assets/images/cat-baby.png"),
   "cat-cooking": require("@/assets/images/cat-cooking.png"),
+  "cat-drinks": require("@/assets/images/cat-drinks.png"),
   "cat-family": require("@/assets/images/cat-family.png"),
   "cat-fruit-veg": require("@/assets/images/cat-fruit-veg.png"),
   "cat-grains": require("@/assets/images/cat-grains.png"),
@@ -31,6 +32,7 @@ export const ART: Record<string, ImageSourcePropType> = {
   "illus-scan": require("@/assets/images/illus-scan.png"),
   "item-applesauce": require("@/assets/images/item-applesauce.png"),
   "item-baby-food": require("@/assets/images/item-baby-food.png"),
+  "item-bottled-water": require("@/assets/images/item-bottled-water.png"),
   "item-brown-rice": require("@/assets/images/item-brown-rice.png"),
   "item-canned-beans": require("@/assets/images/item-canned-beans.png"),
   "item-canned-chicken": require("@/assets/images/item-canned-chicken.png"),

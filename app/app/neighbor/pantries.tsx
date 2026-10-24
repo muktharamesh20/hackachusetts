@@ -41,7 +41,7 @@ export default function Pantries() {
   const [sort, setSort] = useState<Sort>("nearest");
   const [openOnly, setOpenOnly] = useState(false);
   const [stashOnly, setStashOnly] = useState(false);
-  const [need, setNeed] = useState<string | null>(null);
+  const [needs, setNeeds] = useState<string[]>([]);
   const { data, error, refreshing, refresh } = useLoad(async () => {
     const [pantries, stock] = await Promise.all([fetchPantries(), fetchCategoryStock()]);
     return { pantries, stock };
@@ -59,7 +59,7 @@ export default function Pantries() {
         (!q || `${p.name} ${p.address} ${p.city}`.toLowerCase().includes(q)) &&
         (!openOnly || isOpenNow(p)) &&
         (!stashOnly || p.on_stash) &&
-        (!need || hasStock(p, need)),
+        needs.every((c) => hasStock(p, c)),
     );
     const dist = (p: Pantry) => (origin ? distanceMiles(origin, p) : 0);
     return list.sort((a, b) => {
@@ -67,14 +67,14 @@ export default function Pantries() {
       if (sort === "open" && isOpenNow(a) !== isOpenNow(b)) return isOpenNow(a) ? -1 : 1;
       return origin ? dist(a) - dist(b) : a.name.localeCompare(b.name);
     });
-  }, [data, origin, query, sort, openOnly, stashOnly, need]);
+  }, [data, origin, query, sort, openOnly, stashOnly, needs]);
 
   const [sheetOpen, setSheetOpen] = useState(false);
-  const filterCount = Number(openOnly) + Number(stashOnly) + Number(Boolean(need));
+  const filterCount = Number(openOnly) + Number(stashOnly) + needs.length;
   const clearFilters = () => {
     setOpenOnly(false);
     setStashOnly(false);
-    setNeed(null);
+    setNeeds([]);
   };
 
   return (
@@ -134,15 +134,15 @@ export default function Pantries() {
           <OptionRow label="Open now" selected={openOnly} onPress={() => setOpenOnly((v) => !v)} />
           <OptionRow label="Live stock on Stash" selected={stashOnly} onPress={() => setStashOnly((v) => !v)} />
 
-          <Text style={[Type.label, { marginTop: Space.md }]}>HAS IN STOCK</Text>
+          <Text style={[Type.label, { marginTop: Space.md }]}>HAS IN STOCK (PICK ANY NUMBER)</Text>
           <View style={styles.wrap}>
             {CATEGORIES.map((c) => (
               <Chip
                 key={c.key}
                 label={c.label}
-                active={need === c.key}
+                active={needs.includes(c.key)}
                 color={Colors.sky}
-                onPress={() => setNeed(need === c.key ? null : c.key)}
+                onPress={() => setNeeds((n) => (n.includes(c.key) ? n.filter((k) => k !== c.key) : [...n, c.key]))}
               />
             ))}
           </View>

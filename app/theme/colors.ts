@@ -29,6 +29,17 @@ export const Colors = {
   border: "#EADFCC",
 };
 
+/**
+ * Pastel callout cards: a fill, a border in a deeper shade of the same hue (so the
+ * card reads against the cream page), and an ink color for icons/accents.
+ */
+export const Tint = {
+  olive: { bg: "#E1ECCF", border: "#B7CF94", ink: "#557A2B" },
+  mustard: { bg: "#F8E7B6", border: "#E3C46B", ink: "#946A08" },
+  sky: { bg: "#D9E9F0", border: "#A9CADA", ink: "#3B7491" },
+  tomato: { bg: "#F9DCD3", border: "#EBAA98", ink: "#B93F2B" },
+};
+
 export type ViewMode = "pantry" | "neighbor" | "donor";
 
 /** Accent per view: matches the active switcher pill + primary buttons. */

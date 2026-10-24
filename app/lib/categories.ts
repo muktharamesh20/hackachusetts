@@ -28,6 +28,7 @@ const DEFAULTS: CategoryInfo[] = [
   { key: "fruit_veg", label: "Fruit & Veg", art: "cat-fruit-veg", icon: "food-apple", tint: Colors.olive, onShelf: true, donorHint: "" },
   { key: "cooking_basics", label: "Cooking Basics", art: "cat-cooking", icon: "shaker-outline", tint: Colors.mustard, onShelf: true, donorHint: "" },
   { key: "family_kids", label: "Family & Kids", art: "cat-family", icon: "cup", tint: Colors.sky, onShelf: true, donorHint: "" },
+  { key: "drinks", label: "Water & Drinks", art: "cat-drinks", icon: "bottle-soda-classic-outline", tint: Colors.sky, onShelf: true, donorHint: "" },
   { key: "baby", label: "Baby", art: "cat-baby", icon: "baby-bottle-outline", tint: Colors.sky, onShelf: true, donorHint: "" },
   { key: "personal_care", label: "Personal Care", art: "cat-personal-care", icon: "toothbrush", tint: Colors.olive, onShelf: true, donorHint: "" },
   { key: "household", label: "Household", art: "cat-household", icon: "paper-roll", tint: Colors.tomato, onShelf: true, donorHint: "" },

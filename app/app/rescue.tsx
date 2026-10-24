@@ -6,7 +6,7 @@ import { Art, Badge, Button, Card, EmptyState, ErrorText, Screen } from "@/compo
 import { useAuth } from "@/context/AuthContext";
 import { claimRescueBag, fetchPantries, fetchRescueBags, money, RescueBag, timeLabel } from "@/lib/stash";
 import { useLoad } from "@/lib/useLoad";
-import { Colors, ModeColors } from "@/theme/colors";
+import { Colors, ModeColors, Tint } from "@/theme/colors";
 import { Space, Type } from "@/theme/type";
 
 /** Food within a day of its date that neighbors didn't claim; buying it funds the pantry. */
@@ -94,6 +94,6 @@ export default function Rescue() {
 
 const styles = StyleSheet.create({
   top: { flexDirection: "row", gap: 12, alignItems: "center" },
-  claimed: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: Colors.oliveSoft, borderColor: Colors.oliveSoft },
+  claimed: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: Tint.olive.bg, borderColor: Tint.olive.border },
   demo: { ...Type.muted, textAlign: "center", fontSize: 12 },
 });

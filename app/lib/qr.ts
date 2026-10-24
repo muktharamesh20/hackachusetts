@@ -21,7 +21,7 @@ const APP_CATEGORY: Record<string, CategoryKey> = {
   produce: "fruit_veg",
   frozen: "fruit_veg",
   dairy: "family_kids",
-  beverage: "family_kids",
+  beverage: "drinks",
   snack: "family_kids",
   condiment: "cooking_basics",
   baby: "baby",

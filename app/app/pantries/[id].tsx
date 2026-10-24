@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Dimensions, Linking, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
-  Art, Button, Card, ErrorText, ExpiryBadge, ItemIcon, Meter,
+  Art, Button, Card, CategoryIcon, ErrorText, ExpiryBadge, ItemIcon, Meter,
 } from "@/components/ui";
 import { useProfile } from "@/context/ProfileContext";
 import { CATEGORIES } from "@/lib/categories";
@@ -13,7 +13,7 @@ import {
   claimPantry, daysUntil, distanceMiles, fetchCategoryStock, fetchItems, fetchPantry, hoursLabel, isOpenNow,
 } from "@/lib/stash";
 import { useLoad } from "@/lib/useLoad";
-import { Colors, ModeColors } from "@/theme/colors";
+import { Colors, ModeColors, Tint } from "@/theme/colors";
 import { Fonts, Radii, Shadow, Space, Type } from "@/theme/type";
 
 const WIDTH = Dimensions.get("window").width;
@@ -112,6 +112,25 @@ export default function PantryDetail() {
                 </View>
               </View>
 
+              {p.on_stash && (
+                <Card
+                  style={styles.dropCard}
+                  onPress={() => {
+                    setMode("donor");
+                    router.push({ pathname: "/donor/scan", params: { pantry: p.id } });
+                  }}
+                >
+                  <View style={styles.dropIcon}>
+                    <MaterialCommunityIcons name="barcode-scan" size={22} color={Colors.white} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={Type.h3}>Bringing food here?</Text>
+                    <Text style={Type.muted}>Scan your drop-off so volunteers don't have to.</Text>
+                  </View>
+                  <MaterialCommunityIcons name="chevron-right" size={24} color={Colors.text} />
+                </Card>
+              )}
+
               {!p.on_stash && (
                 <Card style={styles.notOnStash}>
                   <Art name="hazel-acorn-hug" width={110} style={{ alignSelf: "center" }} />
@@ -141,22 +160,13 @@ export default function PantryDetail() {
                   const target = st?.target_units ?? 1;
                   return (
                     <View key={c.key} style={styles.stockRow}>
-                      <Art name={c.art} width={26} />
+                      <CategoryIcon category={c.key} size={26} plain />
                       <Text style={styles.stockLabel} numberOfLines={1}>{c.label}</Text>
                       <Meter units={units} target={target} height={8} />
                     </View>
                   );
                 })}
               </View>
-
-              {mode === "donor" && (
-                <Text
-                  style={styles.link}
-                  onPress={() => router.push({ pathname: "/donor/scan", params: { pantry: p.id } })}
-                >
-                  Bringing food here? Scan a drop-off
-                </Text>
-              )}
 
               {grabSoon.length > 0 && (
                 <View>
@@ -234,6 +244,11 @@ const styles = StyleSheet.create({
   divider: { borderTopWidth: 1, borderTopColor: Colors.line },
   link: { fontFamily: Fonts.bodyBold, fontSize: 14, color: Colors.sky, marginLeft: 4 },
   notOnStash: { gap: 10, alignItems: "stretch" },
+  dropCard: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: Tint.olive.bg, borderColor: Tint.olive.border },
+  dropIcon: {
+    width: 42, height: 42, borderRadius: 14, backgroundColor: Tint.olive.ink,
+    alignItems: "center", justifyContent: "center",
+  },
   credit: { ...Type.muted, fontSize: 11, textAlign: "center" },
   grabRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 },
   bottom: {

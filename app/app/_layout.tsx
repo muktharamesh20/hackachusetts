@@ -14,7 +14,7 @@ import { ProfileProvider, useProfile } from "@/context/ProfileContext";
 import { hydrateAppData } from "@/lib/appData";
 import { Colors } from "@/theme/colors";
 
-const VIEW_ROOTS = ["pantry", "neighbor", "donor", "items", "pantries", "rescue"];
+const VIEW_ROOTS = ["pantry", "neighbor", "donor", "items", "pantries", "rescue", "dropoffs"];
 
 function RootNavigator() {
   const { session, loading: authLoading } = useAuth();

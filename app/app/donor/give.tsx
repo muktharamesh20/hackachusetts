@@ -1,12 +1,13 @@
 import { useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import { StyleSheet, Text, TextInput, View } from "react-native";
+import { PantrySelect } from "@/components/PantryPicker";
 import { Art, Button, Card, Chip, ErrorText, Screen } from "@/components/ui";
 import { CATEGORIES } from "@/lib/categories";
 import { mealsPerDollar } from "@/lib/needs";
 import { donate, fetchStashPantries, money } from "@/lib/stash";
 import { useLoad } from "@/lib/useLoad";
-import { Colors, ModeColors } from "@/theme/colors";
+import { Colors, ModeColors, Tint } from "@/theme/colors";
 import { Fonts, Space, Type } from "@/theme/type";
 
 const AMOUNTS = [5, 10, 25, 50];
@@ -72,12 +73,7 @@ export default function Give() {
       <Text style={Type.h1}>Give money</Text>
       <Text style={Type.muted}>100% goes to the pantry you pick.</Text>
 
-      <Text style={Type.label}>PANTRY</Text>
-      <View style={styles.wrap}>
-        {(pantries ?? []).map((p) => (
-          <Chip key={p.id} label={p.name} active={pantryId === p.id} color={GREEN.main} onPress={() => setPantryId(p.id)} />
-        ))}
-      </View>
+      <PantrySelect pantries={pantries ?? []} value={pantryId} onChange={setPantryId} color={GREEN.main} label="Giving to" />
 
       <Text style={Type.label}>AMOUNT</Text>
       <View style={styles.amounts}>
@@ -143,8 +139,8 @@ const styles = StyleSheet.create({
     flex: 1, backgroundColor: Colors.card, borderWidth: 1.5, borderColor: Colors.line, borderRadius: 999,
     paddingHorizontal: 14, paddingVertical: 8, fontFamily: Fonts.bodyBold, fontSize: 13, color: Colors.text,
   },
-  estimate: { alignItems: "center", backgroundColor: Colors.oliveSoft, borderColor: Colors.oliveSoft },
-  estimateNum: { fontFamily: Fonts.displayHeavy, fontSize: 36, color: Colors.oliveDark },
+  estimate: { alignItems: "center", backgroundColor: Tint.olive.bg, borderColor: Tint.olive.border },
+  estimateNum: { fontFamily: Fonts.displayHeavy, fontSize: 36, color: Tint.olive.ink },
   thanks: { flexGrow: 1, justifyContent: "center", alignItems: "center", gap: Space.lg },
   demo: { fontFamily: Fonts.bodySemi, fontSize: 12, color: Colors.textMuted, textAlign: "center" },
 });

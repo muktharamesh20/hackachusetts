@@ -1,3 +1,4 @@
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { AppHeader } from "@/components/AppHeader";
@@ -9,14 +10,28 @@ import { useAuth } from "@/context/AuthContext";
 import { useStaffPantryId } from "@/context/ProfileContext";
 import { CATEGORIES, Settings } from "@/lib/categories";
 import {
-  acceptDropoffs, fetchActivity, fetchCategoryStock, fetchItems, fetchPantry, fetchPendingDropoffs,
+  acceptDropoffs, Dropoff, fetchActivity, fetchCategoryStock, fetchItems, fetchPantry, fetchPendingDropoffs,
   fetchRecentLots, timeAgo, unitsExpiringWithin,
 } from "@/lib/stash";
 import { useLoad } from "@/lib/useLoad";
-import { Colors } from "@/theme/colors";
+import { Colors, Tint } from "@/theme/colors";
 import { Fonts, Space, Type } from "@/theme/type";
 
 const SOURCE_SHORT: Record<string, string> = { robot: "Robot", scan: "Scanned", donor: "Donor", manual: "Added" };
+
+type Bag = { id: string; donor: string; units: number; names: string; at: string };
+
+/** Group pending drop-off rows by donor bag. */
+function bags(rows: Dropoff[]): Bag[] {
+  const map = new Map<string, Bag>();
+  for (const d of rows) {
+    const b = map.get(d.batch_id) ?? { id: d.batch_id, donor: d.donor_name ?? "A neighbor", units: 0, names: "", at: d.created_at };
+    b.units += d.quantity;
+    b.names = b.names ? `${b.names}, ${d.name}` : d.name;
+    map.set(d.batch_id, b);
+  }
+  return [...map.values()];
+}
 
 function greeting() {
   const h = new Date().getHours();
@@ -74,14 +89,22 @@ export default function PantryHome() {
               <Text style={Type.h3}>
                 {data.dropoffs.reduce((n, d) => n + d.quantity, 0)} items scanned in by donors
               </Text>
-              <Text style={Type.muted} numberOfLines={2}>
-                {data.dropoffs.map((d) => (d.quantity > 1 ? `${d.name} (${d.quantity})` : d.name)).join(", ")}
-              </Text>
+              <Text style={Type.muted}>Tap a bag to check it, or scan the slip in its box.</Text>
             </View>
           </View>
+          {bags(data.dropoffs).map((bag) => (
+            <Pressable key={bag.id} style={styles.bagRow} onPress={() => router.push(`/dropoffs/${bag.id}`)}>
+              <View style={{ flex: 1 }}>
+                <Text style={Type.bodySemi}>{bag.donor}'s bag · {bag.units} {bag.units === 1 ? "item" : "items"}</Text>
+                <Text style={Type.muted} numberOfLines={1}>{bag.names}</Text>
+              </View>
+              <Text style={Type.muted}>{timeAgo(bag.at)}</Text>
+              <MaterialCommunityIcons name="chevron-right" size={22} color={Colors.text} />
+            </Pressable>
+          ))}
           <ErrorText message={acceptError} />
           <Button
-            title="Add to stock"
+            title="Add all to stock"
             icon="check-all"
             color={Colors.olive}
             dark={Colors.oliveDark}
@@ -150,8 +173,12 @@ const styles = StyleSheet.create({
   hero: { flexDirection: "row", alignItems: "center", gap: Space.md, marginTop: Space.sm },
   stats: { flexDirection: "row", gap: Space.sm },
   row: { flexDirection: "row", alignItems: "center", gap: 10 },
-  dropoffCard: { gap: 12, backgroundColor: Colors.oliveSoft, borderColor: Colors.oliveSoft },
+  dropoffCard: { gap: 12, backgroundColor: Tint.olive.bg, borderColor: Tint.olive.border },
   dropoffTop: { flexDirection: "row", alignItems: "center", gap: 12 },
+  bagRow: {
+    flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 10,
+    borderTopWidth: 1, borderTopColor: Tint.olive.border,
+  },
   recentScroll: { marginHorizontal: -Space.gutter },
   recentRow: { gap: 10, paddingHorizontal: Space.gutter, paddingBottom: 6 },
   recentCard: { width: 128, padding: 12, gap: 4 },

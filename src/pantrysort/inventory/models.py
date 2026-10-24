@@ -36,6 +36,7 @@ class FoodCategory(str, Enum):
     FRUIT_VEG = "fruit_veg"
     COOKING_BASICS = "cooking_basics"
     FAMILY_KIDS = "family_kids"
+    DRINKS = "drinks"
     PERSONAL_CARE = "personal_care"
     HOUSEHOLD = "household"
 
@@ -47,7 +48,7 @@ _APP_CATEGORY = {
     FoodCategory.PRODUCE: FoodCategory.FRUIT_VEG,
     FoodCategory.FROZEN: FoodCategory.FRUIT_VEG,
     FoodCategory.DAIRY: FoodCategory.FAMILY_KIDS,
-    FoodCategory.BEVERAGE: FoodCategory.FAMILY_KIDS,
+    FoodCategory.BEVERAGE: FoodCategory.DRINKS,
     FoodCategory.SNACK: FoodCategory.FAMILY_KIDS,
     FoodCategory.CONDIMENT: FoodCategory.COOKING_BASICS,
     FoodCategory.NON_FOOD: FoodCategory.HOUSEHOLD,
