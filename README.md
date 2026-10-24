@@ -1,147 +1,111 @@
-# PantrySort 🥫🤖
+# PantrySort / Stash 🥫🤖
 
-A robotics system for **autonomous food pantry sorting** that combines:
+A food-pantry automation system combining:
 
-- **[Drake](https://drake.mit.edu/)** — physics-based simulation, manipulation planning, and grasp/motion generation.
-- **[LeRobot](https://github.com/huggingface/lerobot)** (🤗) — learned visuomotor policies for perception-driven pick-and-place.
-- **Pantry inventory domain logic** — tracking every item in and out with expiration dates, quantities, calories, and allergens.
+- **Drake + SO-101** — kinematic simulation, camera-based QR identification,
+  active item presentation, safe motion, and sorting.
+- **QR/catalog perception** — PS1 labels, standard barcode lookup, item facts,
+  expiration provenance, and category routing.
+- **Supabase Postgres** — pantry-scoped inventory, expiration lots, FEFO
+  distribution, lifecycle transactions, catalog data, roles, and drop-offs.
+- **Expo / React Native** — the current mobile app with pantry staff, donor, and
+  neighbor experiences.
+- **LeRobot integration seams** — learned policy support alongside the scripted
+  simulation policy.
 
-The goal: help food pantries receive, identify, store, and distribute donated food efficiently and safely, reducing waste from expired goods and improving the nutritional quality of what gets distributed.
+The repository contains a working robotics simulation and a substantially
+implemented mobile app. The current integration work is about reconciling their
+shared catalog, category, lot, authorization, and atomic-operation contracts.
 
----
+## Start here
 
-## Why this exists
+- [`DEV_NOTES.md`](DEV_NOTES.md) — robotics environment notes.
+- [`.kiro/steering/project-context.md`](.kiro/steering/project-context.md) —
+  current architecture and contributor conventions.
+- [`.kiro/specs/camera-vision/`](.kiro/specs/camera-vision/) — camera rig, QR
+  identification, active scan, motion, and obstacle-avoidance specification.
+- [`.kiro/specs/pantry-app-integration/`](.kiro/specs/pantry-app-integration/) —
+  robot/Supabase/mobile integration requirements, design, and tasks.
+- [`docs/PROBLEM_AND_SOLUTION.md`](docs/PROBLEM_AND_SOLUTION.md) — problem and
+  solution overview.
+- [`docs/SUPABASE_SETUP.md`](docs/SUPABASE_SETUP.md) — current Supabase setup.
+- [`app/README.md`](app/README.md) — mobile app and native iOS Release setup.
 
-Food pantries are overwhelmingly volunteer-run and process huge, unpredictable streams of donated food. The two hardest operational problems are:
+## Repository layout
 
-1. **Physical sorting** — a mixed bin of cans, boxes, jars, and bags must be identified and placed into the correct storage location (by category, by expiration, by allergen).
-2. **Inventory accounting** — knowing what you have, when it expires, how many calories/servings it represents, and what to distribute first (FEFO — First Expired, First Out).
-
-PantrySort tackles both: a robot arm (simulated in Drake, driven by a LeRobot policy) does the physical sorting, while an inventory service records every item's lifecycle.
-
-See [`docs/PROBLEM_AND_SOLUTION.md`](docs/PROBLEM_AND_SOLUTION.md) for the full problem statement and solution design.
-
----
-
-## Project layout
-
-```
+```text
 hackachusetts/
-├── README.md
-├── docs/
-│   └── PROBLEM_AND_SOLUTION.md      # Full problem/solution writeup
-├── pyproject.toml                   # Package + dependency definitions
-├── requirements.txt                 # Pinned runtime deps (pip fallback)
-├── requirements-dev.txt             # Dev/test/lint deps
-├── environment.yml                  # Conda environment (recommended)
-├── Makefile                         # Common dev commands
-├── .env.example                     # Example configuration
-├── .gitignore
-├── src/
-│   └── pantrysort/
-│       ├── __init__.py
-│       ├── config.py                # Central configuration
-│       ├── inventory/               # Inventory domain (expiry, calories, FEFO)
-│       │   ├── __init__.py
-│       │   ├── models.py
-│       │   ├── store.py
-│       │   └── nutrition.py
-│       ├── perception/              # Item identification
-│       │   ├── __init__.py
-│       │   └── classifier.py
-│       ├── sim/                     # Drake simulation + manipulation
-│       │   ├── __init__.py
-│       │   ├── station.py
-│       │   ├── pantry_scene.py
-│       │   └── pick_and_place.py
-│       ├── policy/                  # LeRobot policy integration
-│       │   ├── __init__.py
-│       │   ├── lerobot_policy.py
-│       │   └── dataset.py
-│       └── pipeline/                # Orchestration (sort loop)
-│           ├── __init__.py
-│           └── sort_loop.py
-├── scripts/
-│   ├── run_sim.py                   # Launch the Drake sorting simulation
-│   ├── record_dataset.py            # Record a LeRobot dataset from the sim
-│   └── train_policy.py              # Train a LeRobot policy
-├── tests/
-│   ├── test_inventory.py
-│   └── test_nutrition.py
+├── .kiro/
+│   ├── steering/                         # project-wide architecture guidance
+│   └── specs/
+│       ├── camera-vision/                # current simulation spec
+│       └── pantry-app-integration/       # robot/backend/app contract
+├── app/                                  # Expo Router React Native app
 ├── assets/
-│   └── models/                      # SDF/URDF scene + item assets (placeholder)
-└── .kiro/
-    ├── steering/                    # Project-wide guidance for Kiro
-    └── specs/
-        └── pantry-sorting/          # Requirements → Design → Tasks
+│   ├── catalog.yaml                      # source product catalog
+│   ├── barcodes/                         # generated barcode fixtures
+│   └── qr/                               # QR fixtures and printable labels
+├── db/                                   # legacy three-table schema reference
+├── docs/                                 # setup and problem/solution docs
+├── src/pantrysort/
+│   ├── inventory/                        # domain + memory/Supabase adapters
+│   ├── perception/                       # QR, catalog, and identification
+│   ├── sim/                              # Drake station, cameras, scenes, motion
+│   ├── policy/                            # scripted and LeRobot policies
+│   └── pipeline/                         # end-to-end sort loop
+├── supabase/migrations/                  # current production schema source
+├── scripts/                              # simulation, recording, diagnostics
+└── tests/                                # pure Python and simulation tests
 ```
 
----
+## Robotics environment
 
-## Quick start
-
-> **On Windows?** Drake has no Windows wheels - run the simulation under WSL.
-> See [`DEV_NOTES.md`](DEV_NOTES.md) for a known-good WSL + Python 3.12 setup.
-> Use Python 3.10-3.12 everywhere (3.13/3.14 are too new for Drake).
-
-### 1. Create the environment
-
-**Option A — Conda (recommended, handles ffmpeg + Python version cleanly):**
+Use Python 3.10–3.12. Drake does not publish wheels for newer Python versions.
+On Windows, run Drake under the WSL environment documented in `DEV_NOTES.md`.
+On macOS, use a supported Python/Drake installation and verify `pydrake`
+imports before running the station.
 
 ```bash
-conda env create -f environment.yml
-conda activate pantrysort
-pip install -e .
-```
-
-**Option B — venv + pip:**
-
-```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-# ffmpeg with libsvtav1 is required by LeRobot for video encoding:
-#   macOS:  brew install ffmpeg
-#   Ubuntu: sudo apt install ffmpeg
-pip install --upgrade pip
-pip install -e ".[dev]"
-```
-
-> **Python version:** use 3.10–3.12. LeRobot requires >=3.10; `pydrake` wheels are published for 3.10–3.12.
-
-### 2. Verify the install
-
-```bash
-make verify        # checks pydrake + lerobot import and prints versions
-```
-
-### 3. Run the simulation
-
-```bash
+make install-dev
+make test
+make lint
 python scripts/run_sim.py
 ```
 
-This spins up a Drake `MultibodyPlant` pantry scene with an arm and a bin of items, and runs the sort loop. With no trained policy present it falls back to a scripted Drake pick-and-place planner.
+The simulation supports `flat_grid`, `belt_bare`, and `belt_boxes` scene modes.
+Camera/video diagnostics write to timestamped `outputs/` folders. The existing
+camera-vision spec tracks the remaining belt-scene and approach/inter-item
+obstacle-validation work.
 
-Every item has a QR sticker on top (`PS1|sku=…|exp=…|lot=…|cat=…|cal=…|alg=…`: expiry, lot, category, calories, allergens). For each item the arm hovers its gripper camera over the sticker, decodes the rendered frame with OpenCV, and shows a scan card in Meshcat (product, expiry status, calories, allergens, destination, camera view). Then it places the item: expired items go to the dark-red discard bin and are logged as discarded, and everything else goes by category. The demo donation includes expired milk and an apple that expires in 5 days.
+## Supabase and mobile app
 
----
+The current Supabase contract is the migration chain under
+[`supabase/migrations/`](supabase/migrations/), not the older `db/schema.sql`.
+It models pantry-scoped items, per-expiration lots, catalog facts, roles, and
+transactions. See [`docs/SUPABASE_SETUP.md`](docs/SUPABASE_SETUP.md).
 
-## Development
+The app uses the Supabase anon key and RLS. Never put a service-role key in
+`app/.env` or a mobile bundle. To build a native Release version for a physical
+iPhone without Metro:
 
 ```bash
-make install       # editable install with dev extras
-make test          # run pytest
-make lint          # ruff + format check
-make verify        # import-check the heavy robotics deps
+cd app
+npm install
+cp .env.example .env
+# fill EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY
+npx expo prebuild --platform ios
+npx expo run:ios --device --configuration Release
 ```
 
-## Specs
+See [`app/README.md`](app/README.md) for Xcode signing and acceptance checks.
 
-This project is built spec-first. See [`.kiro/specs/pantry-sorting/`](.kiro/specs/pantry-sorting/):
+## Project status
 
-- `requirements.md` — what the system must do (EARS-style acceptance criteria)
-- `design.md` — architecture, components, data flow
-- `tasks.md` — incremental implementation plan
+The simulation and app are functional but the shared contract is still being
+reconciled. The next implementation work is tracked in
+`.kiro/specs/pantry-app-integration/tasks.md`: canonical catalog/category data,
+atomic inventory operations, Python/app adapters, RLS hardening, integration
+tests, and physical-device Release acceptance.
 
 ## License
 

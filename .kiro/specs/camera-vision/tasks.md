@@ -245,3 +245,13 @@ graph TD
   `robot_cam`, on the belt at the reach limit for floor iPhone cameras), which
   triggered a fast roll x tilt sweep.
 - Verify in WSL: `pytest tests/ -p no:cacheprovider` and `ruff check`.
+
+## Integration status
+
+The camera-vision task list describes the current simulation boundary. The
+robot-to-app/backend reconciliation is tracked separately in
+`.kiro/specs/pantry-app-integration/`. Tasks 6-7 (depth obstacle avoidance) were
+implemented on `feature/obstacle-avoidance-rollout` and then retired by task 9;
+they are not active behavior. Once a sort placement is verified, the integration
+spec requires an atomic, idempotent robot-intake event rather than direct legacy
+table writes.
