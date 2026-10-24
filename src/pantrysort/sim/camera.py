@@ -9,8 +9,13 @@ None are overhead or on the gripper. Two kinds of mount are supported:
 
 Each camera is declared by a :class:`CameraSpec` (position + look-at target +
 FOV + resolution). The default rig has the robot camera on ``shoulder_link`` and
-one static camera viewing from the opposite side; add more by extending the
-list or loading one from YAML (:func:`load_rig`).
+two static iPhone cameras on raised stands just past the far edge of the belt;
+add more by extending the list or loading one from YAML (:func:`load_rig`).
+
+A static camera may be a *presentation camera* (``present=True`` with a
+``present_at`` world point on its optical axis): when passive decoding fails,
+the arm holds the item upright at that point to read it up close
+(:func:`presentation_cameras`). ``robot_cam`` rides the arm and is never one.
 
 Drake's ``RgbdSensor`` is a pinhole camera; we approximate a fisheye by
 rendering wide-FOV and distorting the RGB with OpenCV (``apply_fisheye``).
@@ -58,16 +63,20 @@ class CameraSpec:
     height: int = 480
     fov_y: float = np.radians(90.0)
     fisheye: tuple[float, float, float, float] = DEFAULT_FISHEYE_D
+    # Presentation camera: the arm holds unreadable items upright at
+    # ``present_at`` (world coordinates, on this camera's optical axis).
+    present: bool = False
+    present_at: tuple[float, float, float] | None = None
 
 
 def default_rig() -> list[CameraSpec]:
-    """Robot camera on the rotation base + one static camera from the far side.
+    """Robot camera on the rotation base + two static presentation cameras.
 
     The arm base sits near the origin facing +x; the intake grid is in front
     (x in ~[0.15, 0.30]). The robot camera rides ``shoulder_link`` looking
-    forward and slightly down; the static camera sits past the intake area
-    looking back toward the arm, so the two views are roughly opposed and an
-    item occluded in one is visible in the other.
+    forward and slightly down; the iPhone cameras sit past the far edge of the
+    belt looking back toward the arm, so the views are roughly opposed and an
+    item occluded in one is visible in another.
     """
     return [
         CameraSpec(
@@ -84,31 +93,44 @@ def default_rig() -> list[CameraSpec]:
             fov_y=np.radians(125.0),
         ),
         # External iPhone back cameras (main ~26mm-equiv, 4:3, low distortion)
-        # standing ON THE GROUND at the front corners, ~0.5 m out, looking up and
-        # inward at the intake grid. Close enough to decode side stickers and for
-        # the arm to lower an item in front of; off to the corners so they do not
-        # block the arm's swing. look_at is also the point each is meant to watch.
+        # on short stands just past the far edge of the belt (belt spans
+        # x in [0.12, 0.35]), raised above the box rims and looking back toward
+        # the arm. Each is a presentation camera: its optical axis passes
+        # through ``present_at`` (~0.157 m from the lens, 0.234 m from the pan
+        # axis, z 0.13), where the arm holds an item upright to read it. The
+        # pick-station box and most of the intake grid stay in frame for the
+        # passive identification pass.
         CameraSpec(
             name="iphone_left",
             mount="world",
-            xyz=(0.40, -0.30, 0.03),
-            look_at=(0.22, 0.0, 0.05),
+            xyz=(0.37, -0.20, 0.15),
+            look_at=(0.25, -0.10, 0.13),
             width=1280,
             height=960,
             fov_y=IPHONE_FOV_Y,
             fisheye=IPHONE_FISHEYE_D,
+            present=True,
+            present_at=(0.25, -0.10, 0.13),
         ),
         CameraSpec(
             name="iphone_right",
             mount="world",
-            xyz=(0.40, 0.30, 0.03),
-            look_at=(0.22, 0.0, 0.05),
+            xyz=(0.37, 0.20, 0.15),
+            look_at=(0.25, 0.10, 0.13),
             width=1280,
             height=960,
             fov_y=IPHONE_FOV_Y,
             fisheye=IPHONE_FISHEYE_D,
+            present=True,
+            present_at=(0.25, 0.10, 0.13),
         ),
     ]
+
+
+def presentation_cameras(specs: list[CameraSpec]) -> list[str]:
+    """Names of the cameras the arm may hold items in front of (``present=True``
+    with a ``present_at`` point), in rig order."""
+    return [s.name for s in specs if s.present and s.present_at is not None]
 
 
 # --------------------------------------------------------------- geometry / model
@@ -319,8 +341,8 @@ def load_rig(path) -> list[CameraSpec]:
         e = dict(entry)
         if "fov_deg" in e:
             e["fov_y"] = np.radians(e.pop("fov_deg"))
-        for key in ("xyz", "look_at"):
-            if key in e:
+        for key in ("xyz", "look_at", "present_at"):
+            if e.get(key) is not None:
                 e[key] = tuple(float(v) for v in e[key])
         if "fisheye" in e:
             e["fisheye"] = tuple(float(v) for v in e["fisheye"])

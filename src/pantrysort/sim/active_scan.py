@@ -2,50 +2,54 @@
 
 Passive multi-camera decode (perception.identify) handles items whose side
 stickers happen to face a decodable camera. For the rest, the robot grasps the
-item and holds it close in front of a camera, where even a small sticker renders
-large and head-on and decodes reliably. This mirrors how a real arm-mounted
-sorter confirms an unreadable label: bring it to the lens.
+item and holds it close in front of a *presentation* camera, where even a small
+sticker renders large and head-on and decodes reliably. This mirrors how a real
+arm-mounted sorter confirms an unreadable label: bring it to the lens.
 
-Kinematic station assumptions (see sim/station.py): ``move_ee_to`` IKs the grasp
-point to a world position, items are rigidly held after ``attach_nearest`` and
-follow the gripper, and ``publish`` advances/animates. pydrake imports stay
-inside functions.
+Only presentation cameras (``present=True`` with a ``present_at`` point, see
+sim/camera.py) are used as targets; the arm-mounted ``robot_cam`` is never one.
+The flow is two passes:
+
+  * Pass 1 - glide the item to each presentation camera's ``present_at`` point
+    and try a straight read. No rotation here.
+  * Pass 2 (last resort, once per item) - only if every straight read failed,
+    glide to the single camera that saw the largest QR quad and rotate the item
+    about ``wrist_roll`` in one monotonic direction (90/180/270 deg stops),
+    holding still at each stop before reading. No wrist_flex tilt.
+
+Kinematic station assumptions (see sim/station.py): ``move_ee_to_smooth`` IKs the
+grasp point to a world position under velocity/acceleration caps, items are
+rigidly held after ``attach_nearest`` and follow the gripper, ``_ramp_to`` glides
+joints to a goal under the same caps, and ``publish`` advances/animates. pydrake
+imports stay inside functions.
 """
 
 from __future__ import annotations
 
 import logging
+from math import ceil
 
 import numpy as np
 
+from pantrysort.sim.station import MAX_JOINT_ACCEL
+
 logger = logging.getLogger("pantrysort.sim.active_scan")
 
-PRESENT_DISTANCE = 0.12   # hold the item this far in front of the camera lens (m)
 SETTLE_FRAMES = 4
 
 
-LIFT_CLEARANCE = 0.08   # how far to raise a grasped item straight up (m)
+def present_point_for_camera(station, camera_name: str, distance: float | None = None):
+    """The presentation point for ``camera_name``: its spec's ``present_at``.
 
-
-def _lift_straight_up(station, dt: float, clearance: float = LIFT_CLEARANCE, steps: int = 10):
-    """Raise the held item straight up (x,y fixed) so it clears neighbours before
-    any sideways swing. Does nothing if not holding."""
-    if not station.holding:
-        return
-    start = station.ee_position().copy()
-    for k in range(1, steps + 1):
-        s = k / steps
-        station.move_ee_to(np.array([start[0], start[1], start[2] + s * clearance]))
-        station.publish(dt)
-
-def present_point_for_camera(station, camera_name: str, distance: float = PRESENT_DISTANCE):
-    """World point ``distance`` m in front of ``camera_name`` along its optical axis."""
-    cm = station.camera_model(camera_name)
-    if cm is None:
+    Returns ``None`` when the camera is not a presentation camera (no spec, or
+    ``present=False`` / no ``present_at``). ``distance`` is accepted for
+    backward-compatible call sites but ignored - the target is the configured
+    ``present_at`` world point, not a point computed along the optical axis.
+    """
+    spec = station.camera_specs.get(camera_name)
+    if spec is None or not getattr(spec, "present", False) or spec.present_at is None:
         return None
-    cam_pos = cm.X_WC[:3, 3]
-    cam_fwd = cm.X_WC[:3, 2]  # +z points into the scene
-    return np.asarray(cam_pos + cam_fwd * distance, dtype=float)
+    return np.asarray(spec.present_at, dtype=float)
 
 
 def _read_presented(station, camera_name, expected_world=None,
@@ -81,8 +85,8 @@ def _qr_signal(station, camera_name, expected_world=None, pos_tol=0.06):
     """How visible the held item's QR is right now, even if not yet decodable.
 
     Returns `(decoded_text_or_None, quad_area_px)`. Uses detect() so a QR that
-    is located but not readable still yields a positive area, which lets the
-    reorientation search climb toward a fronto-parallel view.
+    is located but not readable still yields a positive area, which lets pass 1
+    rank cameras and the rotation search climb toward a fronto-parallel view.
     """
     import cv2
 
@@ -127,82 +131,80 @@ def _quad_area(c: np.ndarray) -> float:
 _ROLL_IDX, _FLEX_IDX = 4, 3
 
 
-def _reorient_and_read(station, camera_name, expected_world, dt, hold_frames):
-    """Rotate the held item in front of `camera_name` to find a decodable view.
+def _rotate_and_read(station, camera_name, expected_world, dt, hold_frames):
+    """Last-resort rotation search at one presentation camera's present point.
 
-    This handles items like the apple whose curved sticker only reads from some
-    angles. It sweeps `wrist_roll` (and a little `wrist_flex` tilt), and is
-    observation-guided: at each step it measures the QR quad area, climbs toward
-    larger (more fronto-parallel) views, and stops as soon as a decode succeeds.
-    Returns `(text, frame, camera)` or None. Restores the wrist if it fails.
+    Rotates the held item about ``wrist_roll`` ONLY (no wrist_flex tilt) in a
+    single monotonic direction, stopping at +/-90, 180 and 270 degrees. The
+    direction (+ or -) is chosen from ``wrist_roll_room`` to fit the most stops,
+    keeping a 0.05 rad margin from the joint limit; stops that do not fit are
+    skipped and total rotation never exceeds 270 degrees. Moves between stops
+    with ``_ramp_to`` (slow, visible - no SetPositions snaps) and holds still for
+    at least 0.5 s of sim time at each stop before reading.
+
+    Returns `(text, frame, camera)` on the first successful read, else None.
     """
     q_start = station.joint_positions().copy()
-    lo, hi = station.wrist_roll_room()  # (down, up) room from current, rad
-    rolls = _search_offsets(lo, hi)
-    tilts = (0.0, 0.18, -0.18)
+    down, up = station.wrist_roll_room()  # remaining room (down, up) from current, rad
+    margin = 0.05
+    stops_rad = [np.deg2rad(d) for d in (90.0, 180.0, 270.0)]
 
-    best_area = -1.0
-    for tilt in tilts:
-        for droll in rolls:
-            q = station.joint_positions().copy()
-            q[_ROLL_IDX] = q_start[_ROLL_IDX] + droll
-            q[_FLEX_IDX] = q_start[_FLEX_IDX] + tilt
-            station.plant.SetPositions(station.plant_context, station.arm, q)
-            station._update_held()
-            for _ in range(max(2, hold_frames // 2)):
-                station.publish(dt)
-            text, area = _qr_signal(station, camera_name, expected_world)
+    # Pick the direction that fits the most stops within the available room.
+    up_fits = sum(1 for s in stops_rad if s <= up - margin)
+    down_fits = sum(1 for s in stops_rad if s <= down - margin)
+    if up_fits >= down_fits:
+        sign, room = 1.0, up
+    else:
+        sign, room = -1.0, down
+
+    hold = max(1, ceil(0.5 / dt))  # >= 0.5 s of sim time still at each stop
+    stop_i = 0
+    for s in stops_rad:
+        if s > room - margin:
+            continue  # this stop would exceed the joint limit; skip it
+        stop_i += 1
+        q_goal = q_start.copy()
+        q_goal[_ROLL_IDX] = q_start[_ROLL_IDX] + sign * s
+        station._ramp_to(q_goal, dt, max_speed=1.0, max_accel=MAX_JOINT_ACCEL)
+        for _ in range(hold):
+            station.publish(dt)
+        logger.info("Rotate search %s: stop %d (%+d deg)",
+                    camera_name, stop_i, int(round(sign * np.rad2deg(s))))
+        hit = _read_presented(station, camera_name, expected_world=expected_world)
+        if hit is None:
+            text, _area = _qr_signal(station, camera_name, expected_world)
             if text is not None:
                 frame = station.camera_rgb(camera_name)
-                logger.info("Reorient read %s (roll%+.2f tilt%+.2f)", camera_name, droll, tilt)
-                return text, frame, camera_name
-            best_area = max(best_area, area)
-    # Nothing decoded; leave the wrist where the biggest QR quad was seen is not
-    # tracked here, so just restore the starting pose for a clean handoff.
-    station.plant.SetPositions(station.plant_context, station.arm, q_start)
-    station._update_held()
-    station.publish(dt)
+                hit = (text, frame, camera_name)
+        if hit is not None:
+            logger.info("Rotate search read %s at stop %d", camera_name, stop_i)
+            return hit
+
+    # Nothing decoded; glide the wrist back to where it started for a clean handoff.
+    station._ramp_to(q_start, dt, max_speed=1.0, max_accel=MAX_JOINT_ACCEL)
     return None
-
-
-def _search_offsets(down: float, up: float, step: float = 0.35):
-    """wrist_roll offsets to try, ordered small-first and alternating sign, kept
-    inside the joint's remaining room."""
-    offs = [0.0]
-    k = 1
-    while True:
-        a = k * step
-        added = False
-        if a <= up - 0.05:
-            offs.append(a)
-            added = True
-        if a <= down - 0.05:
-            offs.append(-a)
-            added = True
-        if not added:
-            break
-        k += 1
-    return offs
-
-
-PRESENT_DISTANCES = (0.14, 0.18, 0.12, 0.16)  # tried in order; first reachable wins
 
 
 def present_and_read(station, item_label: str, dt: float = 0.05, hold_frames: int = SETTLE_FRAMES,
                      on_capture=None, cameras=None, keep_held: bool = False):
-    """Grasp `item_label`, present it to each camera, and decode its QR.
+    """Grasp `item_label`, present it to each presentation camera, and decode.
 
     Motion uses the velocity/acceleration-limited `move_ee_to_smooth` so the
     arm glides rather than snaps. `hold_frames` keeps the item still in front
     of the camera (raise it in testing so the rendered frame is crisp).
     `on_capture(camera_name, item_label)` is called while the item is held and
     settled, for a caller that wants to save frames. `cameras` restricts which
-    rig cameras to present to (default: all).
+    presentation cameras to use (default: all presentation cameras), intersected
+    with the rig's presentation set so `robot_cam` is never a target.
 
-    Returns `(text, image, camera)` on success or `None`. The item is set
-    back to its original pose and released before returning, so the normal
-    pick-and-place can grasp it afterwards.
+    Two passes: (1) a straight read at every presentation `present_at` point with
+    no rotation; (2) only if all of those fail, a single rotation search at the
+    camera that saw the largest QR quad. Returns `(text, image, camera)` on
+    success or `None`. On failure the item is set back to its original pose and
+    released; with `keep_held=True` a successful read leaves the item grasped.
     """
+    from pantrysort.sim.camera import presentation_cameras
+
     body = station.item_bodies.get(item_label)
     if body is None:
         return None
@@ -226,20 +228,22 @@ def present_and_read(station, item_label: str, dt: float = 0.05, hold_frames: in
         station.publish(dt)
         return None
 
-    # Lift the item straight up before any sideways motion, so it clears its
-    # neighbours instead of dragging through them.
-    _lift_straight_up(station, dt)
+    # Target only presentation cameras (never robot_cam), in rig order. Respect
+    # the caller's `cameras=` filter by intersecting with the presentation set.
+    present_names = presentation_cameras(list(station.camera_specs.values()))
+    if cameras is not None:
+        allowed = set(cameras)
+        present_names = [n for n in present_names if n in allowed]
 
-    names = cameras if cameras is not None else station.camera_names()
     result = None
-    for name in names:
-        target = None
-        for dist in PRESENT_DISTANCES:
-            cand = present_point_for_camera(station, name, dist)
-            if cand is not None and _reachable(station, cand):
-                target = cand
-                break
+    # Pass 1: straight reads at each present_at, recording QR quad area per camera.
+    best_signal: list[tuple[float, str, np.ndarray]] = []
+    for name in present_names:
+        target = present_point_for_camera(station, name)
         if target is None:
+            continue
+        if not _reachable(station, target):
+            logger.info("Active scan: present point for %s unreachable; skipping", name)
             continue
         station.move_ee_to_smooth(target, dt)
         for _ in range(hold_frames):
@@ -248,14 +252,34 @@ def present_and_read(station, item_label: str, dt: float = 0.05, hold_frames: in
             on_capture(name, item_label)
         held_pos = np.asarray(station._body_pose(body).translation(), dtype=float)
         hit = _read_presented(station, name, expected_world=held_pos)
-        if hit is None:
-            # One pose did not read (e.g. the apple's curved sticker); rotate/tilt
-            # the item in front of this camera to find a readable view.
-            hit = _reorient_and_read(station, name, held_pos, dt, hold_frames)
         if hit is not None:
-            logger.info("Active scan read %s by presenting to %s", item_label, name)
+            logger.info("Active scan read %s by presenting to %s (straight)", item_label, name)
             result = hit
             break
+        # No straight read: record how large this camera saw the QR quad, to pick
+        # the one camera the rotation search (pass 2) will run at.
+        _text, area = _qr_signal(station, name, held_pos)
+        best_signal.append((area, name, held_pos))
+
+    # Pass 2: last resort, at most once per item. Rotate at the single camera
+    # that saw the largest QR quad (fallback: the first presentation camera).
+    if result is None and present_names:
+        if best_signal:
+            _area, name, held_pos = max(best_signal, key=lambda t: t[0])
+        else:
+            name = present_names[0]
+            held_pos = None
+        target = present_point_for_camera(station, name)
+        if target is not None and _reachable(station, target):
+            station.move_ee_to_smooth(target, dt)
+            for _ in range(hold_frames):
+                station.publish(dt)
+            if held_pos is None:
+                held_pos = np.asarray(station._body_pose(body).translation(), dtype=float)
+            logger.info("Active scan: rotation search for %s at %s", item_label, name)
+            result = _rotate_and_read(station, name, held_pos, dt, hold_frames)
+        else:
+            logger.info("Active scan: rotation camera %s unreachable; no search", name)
 
     if result is not None and keep_held:
         # Leave the item grasped so the caller can place it directly: no
@@ -287,14 +311,19 @@ def _lower_and_release(station, home, dt: float, steps: int = 16) -> None:
         station.publish(dt)
 
 
-def _reachable(station, p_world, tol: float = 0.05) -> bool:
+def _reachable(station, p_world, tol: float = 0.05, item_up_in_hand=None,
+               item_yaw: float | None = None, item_x_in_hand=None) -> bool:
     """Does IK place the grasp point within `tol` of `p_world`?
 
     Uses the IK solver directly (not a rate-limited move) and checks forward
     kinematics on a scratch context, so it does not disturb the live arm.
+    With `item_up_in_hand` (and optionally `item_yaw` / `item_x_in_hand`) the
+    check uses the upright-hold IK, as `Station.move_held_upright_to` does.
     """
     p_world = np.asarray(p_world, dtype=float)
-    q, ok = station._ik.solve(p_world, station.joint_positions(), station._grasp_offset)
+    q, ok = station._ik.solve(p_world, station.joint_positions(), station._grasp_offset,
+                              item_up_in_hand=item_up_in_hand, item_yaw=item_yaw,
+                              item_x_in_hand=item_x_in_hand)
     if not ok:
         return False
     # Evaluate the grasp point at q on the IK's own plant/context.

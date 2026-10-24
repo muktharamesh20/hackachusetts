@@ -84,6 +84,7 @@ PAN_TOLERANCE = 0.35  # rad: keep shoulder_pan close to facing the target
 # tilt this far from vertical. Real SO-101 pick-and-place uses the same kind of
 # angled grasp.
 MAX_APPROACH_TILT = 0.6  # rad (~34 degrees)
+UPRIGHT_TOL = 0.05       # rad: held item's up axis vs world +z (and its yaw) in upright IK
 
 # Gripper joint angle (rad) -> jaw gap (m) at the grasp depth, measured from the
 # SO-101 meshes. Used to close the jaws exactly on each item's width.
@@ -185,6 +186,7 @@ class Station:
     _asset_dir: Any = None     # TemporaryDirectory holding generated sticker/card meshes
     _ik: Any = None
     _held: tuple[Any, Any] | None = None  # (body, X_HI) while an item is grasped
+    _held_up_W: np.ndarray | None = None  # held item's world up axis at grasp
     _gripper: float = 0.0  # 0 open .. 1 closed
     _closed_q: float = GRIPPER_CLOSED_ON_ITEM  # jaw angle that touches the current item
     _grasp_offset: np.ndarray = field(default_factory=lambda: grasp_center_in_tcp(NOMINAL_ITEM_WIDTH))
@@ -296,8 +298,12 @@ class Station:
             logger.warning("Gripper closed but no item within %.2f m of %s.", radius, p)
             return None
         body = self.item_bodies[best]
-        X_HI = self._X_WH().inverse().multiply(self._body_pose(body))
+        X_WI = self._body_pose(body)
+        X_HI = self._X_WH().inverse().multiply(X_WI)
         self._held = (body, X_HI)
+        # The item's up axis (its own +z) in world at grasp; items rest upright,
+        # so this is ~world +z and is what upright moves keep it aligned to.
+        self._held_up_W = np.asarray(X_WI.rotation().matrix()[:, 2], dtype=float)
         self._in_box.pop(best, None)  # out of the box: no longer rides the belt
         shape = self.item_shapes.get(best)
         if shape is not None:  # close the jaws on this item's actual width
@@ -306,6 +312,56 @@ class Station:
 
     def detach(self) -> None:
         self._held = None
+        self._held_up_W = None
+
+    def held_item_up_in_hand(self) -> np.ndarray | None:
+        """The held item's up axis (its own +z) in the gripper_link frame, or None."""
+        if self._held is None:
+            return None
+        return np.asarray(self._held[1].rotation().matrix()[:, 2], dtype=float)
+
+    def held_item_x_in_hand(self) -> np.ndarray | None:
+        """The held item's x axis (whose yaw `held_item_yaw` reports), gripper_link frame."""
+        if self._held is None:
+            return None
+        return np.asarray(self._held[1].rotation().matrix()[:, 0], dtype=float)
+
+    def held_item_tilt(self) -> float | None:
+        """Angle (rad) between the held item's up axis and world +z, or None."""
+        if self._held is None:
+            return None
+        up = self._body_pose(self._held[0]).rotation().matrix()[:, 2]
+        return float(np.arccos(np.clip(up[2] / np.linalg.norm(up), -1.0, 1.0)))
+
+    def solve_held_upright(self, p_W: np.ndarray, yaw: float | None = None,
+                           q_seed: np.ndarray | None = None) -> tuple[np.ndarray, bool]:
+        """Joint solution putting the grasp point at ``p_W`` with the held item
+        upright and (if ``yaw`` given) its x axis at world yaw ``yaw``.
+        Does not move the arm."""
+        q0 = self.joint_positions() if q_seed is None else np.asarray(q_seed, dtype=float)
+        return self._ik.solve(
+            np.asarray(p_W, dtype=float), q0, self._grasp_offset,
+            item_up_in_hand=self.held_item_up_in_hand(), item_yaw=yaw,
+            item_x_in_hand=self.held_item_x_in_hand(),
+        )
+
+    def move_held_upright_to(self, p_W: np.ndarray, yaw: float | None, dt: float,
+                             max_speed: float = MAX_JOINT_SPEED,
+                             max_accel: float = MAX_JOINT_ACCEL) -> bool:
+        """Glide the held item to ``p_W`` keeping it upright (yaw ``yaw`` for its
+        x axis; None leaves yaw free). Ramps all the way to the IK solution under
+        velocity/acceleration caps, publishing each frame. If the upright IK
+        fails the arm does not move (never falls back to a tilted pose)."""
+        if self._held is None:
+            return False
+        q0 = self.joint_positions()
+        q_goal, ok = self.solve_held_upright(p_W, yaw, q0)
+        if not ok:
+            logger.debug("Upright IK failed for %s (yaw=%s); not moving.", p_W, yaw)
+            return False
+        q_goal[self._ik.gripper_index] = q0[self._ik.gripper_index]
+        self._ramp_to(q_goal, dt, max_speed, max_accel)
+        return True
 
     def jaw_heading(self) -> float:
         """Current world yaw of the jaw closing direction (TCP +x, projected flat)."""
@@ -359,6 +415,7 @@ class Station:
         current = self.held_item_yaw()
         body, _ = self._held
         self._held = None
+        self._held_up_W = None
         X0 = self._body_pose(body)
         start, end = X0.translation(), np.asarray(p_W, dtype=float)
         final = current if yaw is None else _nearest_equivalent(yaw, current, np.pi)
@@ -657,6 +714,20 @@ class Station:
         self.plant.SetFreeBodyPose(self.plant_context, body, self._X_WH().multiply(X_HI))
 
 
+def _item_x_in_hand(up_H: np.ndarray, x_H: np.ndarray | None) -> np.ndarray:
+    """Unit item x axis in the hand frame, made perpendicular to ``up_H``.
+
+    Defaults to the hand's own x axis projected off ``up_H``.
+    """
+    up = np.asarray(up_H, dtype=float)
+    up = up / np.linalg.norm(up)
+    x = np.array([1.0, 0.0, 0.0]) if x_H is None else np.asarray(x_H, dtype=float)
+    x = x - np.dot(x, up) * up
+    if np.linalg.norm(x) < 1e-6:  # degenerate: pick any perpendicular
+        x = np.cross(up, [0.0, 1.0, 0.0])
+    return x / np.linalg.norm(x)
+
+
 def _nearest_equivalent(angle: float, ref: float, period: float) -> float:
     """``angle + k*period`` closest to ``ref``."""
     return ref + ((angle - ref + period / 2) % period - period / 2)
@@ -686,38 +757,57 @@ class _ArmIK:
         self.plant = plant
         self.context = plant.CreateDefaultContext()
         self.tcp = plant.GetFrameByName(TCP_FRAME)
+        self.hand = plant.GetBodyByName(HAND_BODY).body_frame()
         self.gripper_index = plant.GetJointByName(GRIPPER_JOINT).position_start()
         self.pan_index = plant.GetJointByName("shoulder_pan").position_start()
         self._lo = plant.GetPositionLowerLimits()
         self._hi = plant.GetPositionUpperLimits()
         self._rng = np.random.default_rng(0)
 
-    def _solve_once(self, p_W, q_seed, q_nominal, offset, jaw_heading=None):
+    def _solve_once(self, p_W, q_seed, q_nominal, offset, jaw_heading=None,
+                    item_up_in_hand=None, item_yaw=None, item_x_in_hand=None):
         from pydrake.multibody.inverse_kinematics import InverseKinematics
         from pydrake.solvers import Solve
 
         ik = InverseKinematics(self.plant, self.context, with_joint_limits=True)
         q = ik.q()
+        world = self.plant.world_frame()
         tol = 1e-3
-        ik.AddPositionConstraint(self.tcp, offset, self.plant.world_frame(),
-                                 p_W - tol, p_W + tol)
-        ik.AddAngleBetweenVectorsConstraint(
-            self.plant.world_frame(), np.array([0.0, 0.0, -1.0]),
-            self.tcp, np.array([0.0, 0.0, 1.0]), 0.0, MAX_APPROACH_TILT,
-        )
-        # Jaw closing direction (TCP +x) points along world heading ``jaw_heading``
-        # (either sign). Default: sideways, tangent to the arm's reach direction,
-        # like a person reaching forward to pinch an object.
+        ik.AddPositionConstraint(self.tcp, offset, world, p_W - tol, p_W + tol)
         dx, dy = p_W[0] - PAN_AXIS_XY[0], p_W[1] - PAN_AXIS_XY[1]
         bearing = np.arctan2(dy, dx)
-        directed = jaw_heading is not None
-        if jaw_heading is None:
-            jaw_heading = bearing + np.pi / 2
-        normal = np.array([-np.sin(jaw_heading), np.cos(jaw_heading), 0.0])
-        ik.AddAngleBetweenVectorsConstraint(
-            self.plant.world_frame(), normal, self.tcp, np.array([1.0, 0.0, 0.0]),
-            np.pi / 2 - 0.05, np.pi / 2 + 0.05,
-        )
+        if item_up_in_hand is not None:
+            # Upright hold: the held item's up axis (in the gripper_link frame)
+            # stays parallel to world +z, replacing the approach-tilt and jaw
+            # constraints (those describe the gripper, not the item).
+            up_H = np.asarray(item_up_in_hand, dtype=float)
+            ik.AddAngleBetweenVectorsConstraint(
+                world, np.array([0.0, 0.0, 1.0]), self.hand, up_H, 0.0, UPRIGHT_TOL,
+            )
+            if item_yaw is not None:
+                x_H = _item_x_in_hand(up_H, item_x_in_hand)
+                # A single tight angle bound fixes the sign too: +yaw, not +yaw+pi.
+                heading = np.array([np.cos(item_yaw), np.sin(item_yaw), 0.0])
+                ik.AddAngleBetweenVectorsConstraint(
+                    world, heading, self.hand, x_H, 0.0, UPRIGHT_TOL,
+                )
+            directed = False
+        else:
+            ik.AddAngleBetweenVectorsConstraint(
+                world, np.array([0.0, 0.0, -1.0]),
+                self.tcp, np.array([0.0, 0.0, 1.0]), 0.0, MAX_APPROACH_TILT,
+            )
+            # Jaw closing direction (TCP +x) points along world heading ``jaw_heading``
+            # (either sign). Default: sideways, tangent to the arm's reach direction,
+            # like a person reaching forward to pinch an object.
+            directed = jaw_heading is not None
+            if jaw_heading is None:
+                jaw_heading = bearing + np.pi / 2
+            normal = np.array([-np.sin(jaw_heading), np.cos(jaw_heading), 0.0])
+            ik.AddAngleBetweenVectorsConstraint(
+                world, normal, self.tcp, np.array([1.0, 0.0, 0.0]),
+                np.pi / 2 - 0.05, np.pi / 2 + 0.05,
+            )
         if directed:
             # Also fix the sign: TCP +x points along +heading, not -heading. Without
             # this the solver may flip the wrist 180 degrees (same jaw line, so the
@@ -742,14 +832,23 @@ class _ArmIK:
         return result.GetSolution(q), result.is_success()
 
     def solve(self, p_W: np.ndarray, q_current: np.ndarray, offset: np.ndarray,
-              jaw_heading: float | None = None) -> tuple[np.ndarray, bool]:
-        """IK so the point ``offset`` (TCP frame) reaches ``p_W``."""
-        q, ok = self._solve_once(p_W, q_current, q_current, offset, jaw_heading)
+              jaw_heading: float | None = None, item_up_in_hand: np.ndarray | None = None,
+              item_yaw: float | None = None,
+              item_x_in_hand: np.ndarray | None = None) -> tuple[np.ndarray, bool]:
+        """IK so the point ``offset`` (TCP frame) reaches ``p_W``.
+
+        With ``item_up_in_hand`` (held item's up axis in the gripper_link frame)
+        the item is held upright instead of constraining the gripper's tilt and
+        jaw heading; ``item_yaw`` then also fixes the world yaw of the item's x
+        axis (``item_x_in_hand``, gripper_link frame).
+        """
+        extra = (item_up_in_hand, item_yaw, item_x_in_hand)
+        q, ok = self._solve_once(p_W, q_current, q_current, offset, jaw_heading, *extra)
         tries = 0
         while not ok and tries < 8:  # random restarts for awkward targets
             seed = self._rng.uniform(self._lo, self._hi)
             seed[self.gripper_index] = q_current[self.gripper_index]
-            q, ok = self._solve_once(p_W, seed, q_current, offset, jaw_heading)
+            q, ok = self._solve_once(p_W, seed, q_current, offset, jaw_heading, *extra)
             tries += 1
         if not ok:
             return q_current, False
