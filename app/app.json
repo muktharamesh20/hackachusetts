@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "PantrySort",
+    "slug": "pantrysort",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "pantrysort",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0f766e"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.muktha.pantrysort"
+    },
+    "android": {
+      "package": "com.muktha.pantrysort",
+      "edgeToEdgeEnabled": true
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-font"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
