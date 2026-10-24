@@ -28,6 +28,8 @@ class SimConfig:
     time_step: float = _get_float("PANTRYSORT_SIM_TIME_STEP", 1e-3)
     realtime_rate: float = _get_float("PANTRYSORT_SIM_REALTIME_RATE", 1.0)
     meshcat: bool = _get_bool("PANTRYSORT_MESHCAT", True)
+    # Render a gripper camera and identify items by decoding their QR stickers.
+    qr_scanner: bool = _get_bool("PANTRYSORT_QR_SCANNER", True)
 
 
 @dataclass(frozen=True)

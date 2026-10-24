@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Optional, Protocol
+from typing import Protocol
 
 from pantrysort.inventory.models import FoodCategory, InventoryItem
 
@@ -23,10 +23,10 @@ class Detection:
     confidence: float
     # World-frame position of the object's grasp point, in meters.
     position: tuple[float, float, float]
-    unit_calories: Optional[int] = None
-    expiration_date: Optional[date] = None
+    unit_calories: int | None = None
+    expiration_date: date | None = None
     allergens: tuple[str, ...] = ()
-    barcode: Optional[str] = None
+    barcode: str | None = None
 
     def to_item(self, quantity: int = 1) -> InventoryItem:
         return InventoryItem(

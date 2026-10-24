@@ -19,7 +19,7 @@ from pantrysort.config import CONFIG
 from pantrysort.perception.classifier import Detection
 from pantrysort.policy.dataset import DatasetRecorder
 from pantrysort.policy.lerobot_policy import PolicyObservation, make_policy
-from pantrysort.sim.pantry_scene import LOCATION_DROP_POINTS, default_scene
+from pantrysort.sim.pantry_scene import PadLayout, default_scene
 
 logger = logging.getLogger("record_dataset")
 
@@ -68,7 +68,7 @@ def main() -> None:
             if produced >= args.episodes:
                 break
             det = item.to_detection()
-            drop = LOCATION_DROP_POINTS.get("shelf-dry", (0.0, 0.7, 0.2))
+            drop, _ = PadLayout().place("shelf-dry", item.shape.size[2])
             record_episode(recorder, det, drop)
             produced += 1
 
