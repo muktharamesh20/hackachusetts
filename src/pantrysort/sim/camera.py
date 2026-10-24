@@ -83,12 +83,25 @@ def default_rig() -> list[CameraSpec]:
             height=960,
             fov_y=np.radians(125.0),
         ),
-        # External camera: an iPhone back camera (main ~26mm-equiv lens, ~4:3).
-        # Narrow FOV and little distortion, viewing from the opposite side.
+        # External iPhone back cameras (main ~26mm-equiv, 4:3, low distortion)
+        # at the front corners of the intake grid, ~0.30 m out and angled inward:
+        # close enough to decode side stickers (and for the arm to lift an item
+        # up to), but off to the corners so they do not block the arm's forward
+        # or side swing. look_at is also the world point each is meant to watch.
         CameraSpec(
-            name="iphone_far",
+            name="iphone_left",
             mount="world",
-            xyz=(0.58, 0.0, 0.16),
+            xyz=(0.34, -0.26, 0.18),
+            look_at=(0.22, 0.0, 0.03),
+            width=1280,
+            height=960,
+            fov_y=IPHONE_FOV_Y,
+            fisheye=IPHONE_FISHEYE_D,
+        ),
+        CameraSpec(
+            name="iphone_right",
+            mount="world",
+            xyz=(0.34, 0.26, 0.18),
             look_at=(0.22, 0.0, 0.03),
             width=1280,
             height=960,

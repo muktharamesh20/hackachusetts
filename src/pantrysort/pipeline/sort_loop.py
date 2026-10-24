@@ -116,6 +116,14 @@ class SortLoop:
         if station is not None:
             station.start_recording()
 
+        # Identify every item once up front by fusing QR reads across all rig
+        # cameras (match each decoded QR to the nearest item, vote across views).
+        self._identifications = {}
+        if station is not None and getattr(station, "cameras", None):
+            self._identifications = station.identify_items()
+            logger.info("Camera rig identified %d/%d items.",
+                        len(self._identifications), len(self.scene.items))
+
         for scene_item in self.scene.items:
             scan = self._identify(station, scene_item, today)
             result.scans.append(scan)
@@ -169,7 +177,9 @@ class SortLoop:
         """Read the item's QR sticker from the fixed camera rig, if present.
 
         Without a rendering station (logic-only runs, CI) the sticker's payload is
-        used directly, which is what a perfect scan would return.
+        used directly, which is what a perfect scan would return. With a station,
+        every rig camera is scanned once (cached) and QR reads are matched to this
+        item by world position and fused across cameras.
         """
         from pantrysort.perception.qr import detection_from_payload
 
@@ -178,27 +188,44 @@ class SortLoop:
             text = scene_item.qr.encode() if scene_item.qr else None
             return ScanOutcome(det, scene_item.qr, text)
 
-        from pantrysort.sim.pick_and_place import scan_item_rig
-
-        # QR stickers are on the item sides; read them from the fixed camera
-        # rig (base wide-angle + external iPhone views), not a gripper camera.
-        reading = scan_item_rig(station)
-        if reading.qr is not None:
+        ident = self._identifications.get(scene_item.label)
+        if ident is not None:
             try:
-                payload = FoodQrPayload.parse(reading.qr.text)
+                payload = FoodQrPayload.parse(ident.text)
             except PayloadError as exc:
-                logger.warning("QR on item at %s isn't a PantrySort label (%s).",
-                               scene_item.position, exc)
+                logger.warning("QR matched to %s isn't a PantrySort label (%s).",
+                               scene_item.label, exc)
             else:
                 det = detection_from_payload(payload, self._catalog, scene_item.position, today)
-                return ScanOutcome(det, payload, reading.qr.text, reading.image,
-                                   reading.qr.corners, source="camera")
+                logger.info("Identified %-22s via %s (votes %d/%d)", scene_item.label,
+                            ",".join(ident.cameras), ident.votes, ident.total_reads)
+                image = station.camera_rgb(ident.cameras[0]) if ident.cameras else None
+                return ScanOutcome(det, payload, ident.text, image, source="camera")
 
-        logger.warning("Could not read a QR label at %s; sending to the misc bin.",
-                       scene_item.position)
+        # Passive fusion missed this item: actively present it to a camera. The
+        # arm lifts the item to a reachable lens, where its QR is large and
+        # head-on; the read is accepted only if it back-projects to where the
+        # held item is (so a different item's sticker can't be misattributed).
+        from pantrysort.sim.active_scan import present_and_read
+
+        active = present_and_read(station, scene_item.label)
+        if active is not None:
+            text, image, cam = active
+            try:
+                payload = FoodQrPayload.parse(text)
+            except PayloadError as exc:
+                logger.warning("Active scan of %s isn't a PantrySort label (%s).",
+                               scene_item.label, exc)
+            else:
+                det = detection_from_payload(payload, self._catalog, scene_item.position, today)
+                logger.info("Identified %-22s by presenting to %s", scene_item.label, cam)
+                return ScanOutcome(det, payload, text, image, source="camera-active")
+
+        logger.warning("No camera read a QR for %s; sending to the misc bin.",
+                       scene_item.label)
         det = Detection(label="Unlabeled item", category=FoodCategory.UNKNOWN, confidence=0.0,
                         position=scene_item.position)
-        return ScanOutcome(det, image=reading.image, source="camera")
+        return ScanOutcome(det, source="camera")
 
     def _show_scan(self, station, scan: ScanOutcome, location: StorageLocation | None,
                    today: date) -> None:

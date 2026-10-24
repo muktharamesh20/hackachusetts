@@ -98,6 +98,40 @@ def decode_qr_codes(image: np.ndarray) -> list[DecodedQr]:
         results = [DecodedQr(r.text, r.corners / 2) for r in _decode_with(cv2.QRCodeDetector(), up)]
     if not results and hasattr(cv2, "QRCodeDetectorAruco"):
         results = _decode_with(cv2.QRCodeDetectorAruco(), gray)
+    if not results:
+        # Oblique / perspective views: detect the QR quad (its finder squares make
+        # the quad recoverable), warp it flat, then decode the rectified patch.
+        results = _decode_rectified(gray)
+    return results
+
+
+def _decode_rectified(gray: np.ndarray, out_side: int = 240) -> list[DecodedQr]:
+    """Rectify each detected QR quad to a flat square and decode it.
+
+    Uses the QR's own corner geometry to undo perspective/lens warp so we can
+    read codes the detector can locate but not sample head-on. Corners are
+    reported in the original image coordinates.
+    """
+    import cv2
+
+    det = cv2.QRCodeDetector()
+    ok, quads = det.detectMulti(gray)
+    if not ok or quads is None:
+        found, q = det.detect(gray)
+        quads = q.reshape(1, 4, 2) if (found and q is not None) else None
+    if quads is None:
+        return []
+
+    results: list[DecodedQr] = []
+    dst = np.array([[0, 0], [out_side, 0], [out_side, out_side], [0, out_side]],
+                   dtype=np.float32)
+    for quad in np.asarray(quads, dtype=np.float32).reshape(-1, 4, 2):
+        Hm = cv2.getPerspectiveTransform(quad, dst)
+        rect = cv2.warpPerspective(gray, Hm, (out_side, out_side))
+        rect = cv2.copyMakeBorder(rect, 24, 24, 24, 24, cv2.BORDER_CONSTANT, value=255)
+        text, _, _ = cv2.QRCodeDetector().detectAndDecode(rect)
+        if text:
+            results.append(DecodedQr(text=text, corners=quad.astype(float)))
     return results
 
 

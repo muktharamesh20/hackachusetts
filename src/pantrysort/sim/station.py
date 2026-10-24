@@ -136,6 +136,7 @@ class Station:
     realtime_rate: float = 1.0
     scanner: Any = None        # RgbdSensor on the gripper (None = rendering unavailable)
     cameras: dict = field(default_factory=dict)  # name -> RgbdSensor (localization rig)
+    camera_specs: dict = field(default_factory=dict)  # name -> CameraSpec
     scan_display: Any = None   # ScanDisplay for Meshcat (None without Meshcat)
     _asset_dir: Any = None     # TemporaryDirectory holding generated sticker/card meshes
     _ik: Any = None
@@ -318,6 +319,56 @@ class Station:
             return (float(p[0]), float(p[1]), float(p[2]))
 
         return _locate
+
+    def camera_views(self):
+        """Build a `CameraView` per rig camera (frame + pixel->world locator).
+
+        The locator closes over each camera's name so back-projection uses that
+        camera's own depth and pose.
+        """
+        from pantrysort.perception.identify import CameraView
+
+        views = []
+        for name in self.camera_names():
+            frame = self.camera_rgb(name)
+            if frame is None:
+                continue
+            spec = self.camera_specs.get(name)
+            watch = np.asarray(spec.look_at, dtype=float) if spec is not None else None
+            views.append(
+                CameraView(
+                    name=name,
+                    image=frame,
+                    locate=(lambda u, v, n=name: self.locate_pixel(u, v, n)),
+                    watch=watch,
+                )
+            )
+        return views
+
+    def identify_items(self, max_dist: float = 0.06):
+        """Fuse QR reads across all rig cameras into {item_label: IdentifiedItem}.
+
+        Each decoded QR is back-projected to world and matched to the nearest
+        scene item (within `max_dist`), then fused by majority vote across
+        cameras for robustness to the odd misread.
+        """
+        from pantrysort.perception.identify import identify
+
+        positions = {
+            item.label: np.asarray(self.scene_item_position(item.label), dtype=float)
+            for item in self.scene.items
+        }
+        return identify(self.camera_views(), positions, max_dist=max_dist)
+
+    def scene_item_position(self, label: str):
+        """Live world position of an item body (falls back to its scene pose)."""
+        body = self.item_bodies.get(label)
+        if body is None:
+            for it in self.scene.items:
+                if it.label == label:
+                    return np.asarray(it.position, dtype=float)
+            return np.zeros(3)
+        return np.asarray(self._body_pose(body).translation(), dtype=float)
     def scanner_image(self) -> np.ndarray | None:
         """Current RGBA frame from the gripper's QR scanner camera."""
         if self.scanner is None:
@@ -596,10 +647,13 @@ def build_station(
     plant.Finalize()
     scanner = _add_scanner(builder, plant, scene_graph) if config.qr_scanner else None
     cameras: dict[str, Any] = {}
+    camera_specs: dict[str, Any] = {}
     if getattr(config, "overhead_camera", True):
         from pantrysort.sim.camera import add_rig, default_rig
 
-        cameras = add_rig(builder, plant, scene_graph, default_rig())
+        specs = default_rig()
+        cameras = add_rig(builder, plant, scene_graph, specs)
+        camera_specs = {s.name: s for s in specs}
 
     meshcat = None
     if config.meshcat:
@@ -635,6 +689,7 @@ def build_station(
         realtime_rate=config.realtime_rate,
         scanner=scanner,
         cameras=cameras,
+        camera_specs=camera_specs,
         _asset_dir=asset_dir,
         _ik=_ArmIK(),
     )
@@ -682,7 +737,12 @@ def _register_item_geometry(plant, body, shape: ItemShape, name: str, color) -> 
 
 
 def _register_qr_sticker(plant, body, item, name: str, out_dir: Path) -> None:
-    """Visual-only QR sticker on top of the item (seen by Meshcat and the scanner)."""
+    """Visual QR stickers on two opposite SIDE faces of the item (+x and -x).
+
+    Items are placed facing the arm, so one side faces the base-side cameras and
+    the other faces the far-side camera; putting a sticker on both means at least
+    one is visible to a decodable (narrow-FOV) camera from some viewpoint.
+    """
     from pydrake.geometry import (
         GeometryInstance,
         IllustrationProperties,
@@ -690,29 +750,29 @@ def _register_qr_sticker(plant, body, item, name: str, out_dir: Path) -> None:
         PerceptionProperties,
         RenderLabel,
     )
-    from pydrake.math import RigidTransform
+    from pydrake.math import RigidTransform, RotationMatrix
 
     from pantrysort.sim.scan_display import LABEL_LIFT, label_size, write_qr_label_mesh
 
     size = item.shape.size
-    from pydrake.math import RotationMatrix
-
-    # Sticker sized to the item's side (x-z) face; placed on the +x face,
-    # which faces the arm/camera rig since items are placed facing the arm.
     side = min(label_size((size[0], size[2], size[2])), 0.9 * min(size[0], size[2]))
     obj = write_qr_label_mesh(item.qr, out_dir, f"{name}_qr", side)
-    # The quad faces +z in its own frame; rotate so its normal is +x and
-    # shift it onto the side face.
-    X_sticker = RigidTransform(
-        RotationMatrix.MakeYRotation(np.pi / 2), [size[0] / 2 + LABEL_LIFT, 0.0, 0.0]
-    )
-    instance = GeometryInstance(X_sticker, Mesh(str(obj)), f"{name}_qr_visual")
-    # No diffuse color: both Meshcat and VTK then use the OBJ's texture.
-    instance.set_illustration_properties(IllustrationProperties())
-    perception = PerceptionProperties()
-    perception.AddProperty("label", "id", RenderLabel(int(body.index())))
-    instance.set_perception_properties(perception)
-    plant.RegisterVisualGeometry(body, instance)
+
+    # A quad faces +z in its own frame. Rotate +/-90 deg about y so its normal
+    # points along +x / -x, and shift it onto that face.
+    faces = {
+        "px": RigidTransform(RotationMatrix.MakeYRotation(np.pi / 2),
+                             [size[0] / 2 + LABEL_LIFT, 0.0, 0.0]),
+        "nx": RigidTransform(RotationMatrix.MakeYRotation(-np.pi / 2),
+                             [-size[0] / 2 - LABEL_LIFT, 0.0, 0.0]),
+    }
+    for tag, X_sticker in faces.items():
+        instance = GeometryInstance(X_sticker, Mesh(str(obj)), f"{name}_qr_{tag}_visual")
+        instance.set_illustration_properties(IllustrationProperties())
+        perception = PerceptionProperties()
+        perception.AddProperty("label", "id", RenderLabel(int(body.index())))
+        instance.set_perception_properties(perception)
+        plant.RegisterVisualGeometry(body, instance)
 
 
 def _add_ground_and_fixtures(plant, scene: PantryScene) -> None:
