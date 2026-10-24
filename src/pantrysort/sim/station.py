@@ -370,9 +370,11 @@ class Station:
         n = max(frames, int(np.ceil(dist / MAX_DROP_STEP)))
         for k in range(1, n + 1):
             s = 1.0 - (1.0 - k / n) ** 2  # ease out (fast then slow, like landing)
+            pos = start + s * (end - start)
+            pos[2] = max(pos[2], float(end[2]))  # never settle below the surface
             self.plant.SetFreeBodyPose(
                 self.plant_context, body,
-                RigidTransform(RotationMatrix(q0.slerp(s, q1)), start + s * (end - start)),
+                RigidTransform(RotationMatrix(q0.slerp(s, q1)), pos),
             )
             self.publish(dt)
 
@@ -457,6 +459,41 @@ class Station:
             return (float(p[0]), float(p[1]), float(p[2]))
 
         return _locate
+
+    def draw_camera_markers(self) -> None:
+        """Draw each rig camera in Meshcat as a small cylinder (along its optical
+        axis) with a line back to its mount, so the viewer can see where the
+        cameras are and what they are attached to."""
+        if self.meshcat is None or not self.cameras:
+            return
+        from pydrake.geometry import Cylinder, Rgba
+        from pydrake.math import RigidTransform, RotationMatrix
+
+        base = np.zeros(3)  # arm base at the world origin
+        colors = {
+            "robot_cam": Rgba(0.95, 0.55, 0.15, 1.0),  # orange: on the arm
+        }
+        for name in self.camera_names():
+            cm = self.camera_model(name)
+            if cm is None:
+                continue
+            X_WC = cm.X_WC
+            cam_pos = X_WC[:3, 3]
+            # Cylinder's long axis is its local z; the camera's optical axis is
+            # the X_WC z column, so the camera rotation already aligns it.
+            R = RotationMatrix(X_WC[:3, :3])
+            color = colors.get(name, Rgba(0.2, 0.6, 0.95, 1.0))  # blue: external
+            path = f"/cameras/{name}"
+            self.meshcat.SetObject(path + "/body", Cylinder(0.012, 0.045), color)
+            self.meshcat.SetTransform(path + "/body", RigidTransform(R, cam_pos))
+            # Lens tip: a thin short cylinder a touch in front.
+            self.meshcat.SetObject(path + "/lens", Cylinder(0.006, 0.015),
+                                   Rgba(0.05, 0.05, 0.05, 1.0))
+            self.meshcat.SetTransform(
+                path + "/lens", RigidTransform(R, cam_pos + X_WC[:3, 2] * 0.03))
+            # Line from the camera back to the arm base (its mount reference).
+            pts = np.array([cam_pos, base]).T  # 3xN
+            self.meshcat.SetLine(path + "/mount", pts, 2.0, color)
 
     def camera_views(self):
         """Build a `CameraView` per rig camera (frame + pixel->world locator).
@@ -928,6 +965,7 @@ def build_station(
     station._update_conveyor()
     station.set_gripper(0.0)
     station.move_ee_to(np.array([0.18, 0.0, 0.14]))
+    station.draw_camera_markers()
     diagram.ForcedPublish(station.context)
     return station
 

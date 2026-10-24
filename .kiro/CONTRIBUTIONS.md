@@ -5,6 +5,19 @@ to trace. Newest first. Each entry lists the branch and the key commits.
 
 ---
 
+## Scan reorientation, vertical lift, camera markers
+Branch: eature/obstacle-avoidance-rollout
+- Active scan now does an observation-guided **reorientation search**: if an item
+  (e.g. the apple's curved sticker) does not read at a camera, it rotates
+  wrist_roll / tilts wrist_flex, measures the QR quad area to climb toward a
+  fronto-parallel view, and stops on decode. Strict position gate (0.06 m) so a
+  neighbour's QR is never accepted.
+- After grasping, the arm **lifts the item straight up** before any sideways
+  motion so it clears neighbours; drop settle is clamped to not sink below the
+  surface (ground-collision guard).
+- Meshcat now **draws each camera** as a cylinder (orange = on-arm base cam, blue
+  = external) with a line back to the base.
+
 ## Obstacle-avoidance rollout (Tasks 6-7)
 Branch: eature/obstacle-avoidance-rollout
 - Extended vision obstacle avoidance from the carry phase to the policy-driven
