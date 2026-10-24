@@ -6,9 +6,9 @@ import {
   Art, Badge, Button, Card, Chip, ErrorText, ExpiryBadge, Meter, Screen,
 } from "@/components/ui";
 import { categoryInfo } from "@/lib/categories";
-import { fetchCategoryStock, fetchItem, handOut, timeAgo } from "@/lib/stash";
+import { confirmLotDate, fetchCategoryStock, fetchItem, handOut, timeAgo } from "@/lib/stash";
 import { useLoad } from "@/lib/useLoad";
-import { Colors } from "@/theme/colors";
+import { Colors, Tint } from "@/theme/colors";
 import { Fonts, Space, Type } from "@/theme/type";
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -100,6 +100,17 @@ export default function ItemDetail() {
                     <Text style={Type.muted}>
                       {SOURCE_LABEL[l.source] ?? "Added"} · {timeAgo(l.received_at)}
                     </Text>
+                    {l.expiry_estimated && (
+                      <View style={styles.estimatedRow}>
+                        <Text style={styles.estimated}>Estimated date</Text>
+                        <Text
+                          style={styles.confirm}
+                          onPress={() => confirmLotDate(l.id).then(reload).catch((e) => setActionError(e?.message ?? "Couldn't confirm"))}
+                        >
+                          Confirm date
+                        </Text>
+                      </View>
+                    )}
                   </View>
                   <ExpiryBadge date={l.expiration_date} />
                 </View>
@@ -141,6 +152,12 @@ const styles = StyleSheet.create({
   lotsHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" },
   lotRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 },
   lotDivider: { borderTopWidth: 1.5, borderTopColor: Colors.line },
+  estimatedRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 4 },
+  estimated: {
+    fontFamily: Fonts.bodyBold, fontSize: 11, color: Tint.mustard.ink, backgroundColor: Tint.mustard.bg,
+    paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, overflow: "hidden",
+  },
+  confirm: { fontFamily: Fonts.bodyBold, fontSize: 13, color: Colors.sky },
   lotQty: { fontFamily: Fonts.displayHeavy, fontSize: 22, color: Colors.text, width: 34, textAlign: "center" },
   tags: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
 });

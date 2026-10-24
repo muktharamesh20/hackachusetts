@@ -56,6 +56,8 @@ export type Lot = {
   lot_code: string | null;
   source: "robot" | "scan" | "manual" | "donor";
   received_at: string;
+  /** Date was estimated from typical shelf life; staff should double-check it. */
+  expiry_estimated: boolean;
 };
 
 export type RecentLot = Lot & {
@@ -69,6 +71,9 @@ export type CatalogItem = {
   category: string;
   unit_calories: number | null;
   allergens: string[];
+  tags: string[];
+  good_to_know: string[];
+  shelf_life_days: number | null;
   image_key: string | null;
 };
 
@@ -206,6 +211,7 @@ export async function logItem(input: {
   quantity: number;
   expirationDate: string | null;
   barcode: string | null;
+  expiryEstimated?: boolean;
 }): Promise<Item> {
   const existing = input.barcode ? await findItemByBarcode(input.pantryId, input.barcode) : null;
   // New items start at 0; the lot insert below sets quantity + next expiry via trigger.
@@ -232,6 +238,7 @@ export async function logItem(input: {
       quantity: input.quantity,
       expiration_date: input.expirationDate,
       source: "scan",
+      expiry_estimated: Boolean(input.expiryEstimated && input.expirationDate),
     }),
   );
   await run(
@@ -246,6 +253,13 @@ export async function logItem(input: {
     }),
   );
   return item;
+}
+
+/** Staff checked an estimated date against the package. */
+export async function confirmLotDate(lotId: number, expirationDate?: string | null): Promise<void> {
+  const fields: Record<string, unknown> = { expiry_estimated: false };
+  if (expirationDate !== undefined) fields.expiration_date = expirationDate;
+  await run(supabase.from("inventory_lots").update(fields).eq("id", lotId));
 }
 
 /** Record units leaving the pantry to a neighbor (soonest-expiring first). */
@@ -308,6 +322,7 @@ export const fetchMyDonations = () =>
 
 export type Dropoff = {
   id: number;
+  expiry_estimated?: boolean;
   batch_id: string;
   donor_name: string | null;
   pantry_id: string;
@@ -331,7 +346,10 @@ function newBagId(): string {
 export async function submitDropoff(
   pantryId: string,
   donorName: string,
-  items: { name: string; category: string; quantity: number; expirationDate: string | null; barcode: string | null }[],
+  items: {
+    name: string; category: string; quantity: number; expirationDate: string | null; barcode: string | null;
+    expiryEstimated?: boolean;
+  }[],
 ): Promise<string> {
   const batchId = newBagId();
   await run(
@@ -345,6 +363,7 @@ export async function submitDropoff(
         quantity: i.quantity,
         expiration_date: i.expirationDate,
         barcode: i.barcode,
+        expiry_estimated: Boolean(i.expiryEstimated && i.expirationDate),
       })),
     ),
   );
@@ -356,7 +375,7 @@ export const fetchDropoffBag = (batchId: string) =>
   run<(Dropoff & { status: string })[]>(
     supabase
       .from("dropoff_items")
-      .select("id,batch_id,donor_name,pantry_id,name,category,quantity,expiration_date,barcode,created_at,status")
+      .select("id,batch_id,donor_name,pantry_id,name,category,quantity,expiration_date,expiry_estimated,barcode,created_at,status")
       .eq("batch_id", batchId)
       .order("id"),
   );

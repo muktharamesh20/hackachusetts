@@ -65,7 +65,10 @@ export default function DropoffBag() {
                 <CategoryIcon category={d.category} size={36} />
                 <View style={{ flex: 1 }}>
                   <Text style={Type.bodySemi}>{d.quantity > 1 ? `${d.name} (${d.quantity})` : d.name}</Text>
-                  <Text style={Type.muted}>{d.expiration_date ? `Expires ${d.expiration_date}` : "No date"}</Text>
+                  <Text style={[Type.muted, d.expiry_estimated && { color: Tint.mustard.ink }]}>
+                    {d.expiration_date ? `Expires ${d.expiration_date}` : "No date"}
+                    {d.expiry_estimated ? " · estimated, check the package" : ""}
+                  </Text>
                 </View>
                 {d.status !== "pending" && (
                   <MaterialCommunityIcons name="check-circle" size={22} color={Colors.olive} />

@@ -10,8 +10,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Art, Button, CategoryIcon, Chip, ErrorText } from "@/components/ui";
 import { CATEGORIES, CategoryKey } from "@/lib/categories";
 import { parseLabel } from "@/lib/qr";
-import { findCatalogItem, findItemByBarcode, rememberCode } from "@/lib/stash";
-import { Colors } from "@/theme/colors";
+import { addDays, findExpiry } from "@/lib/expiry";
+import { CatalogItem, findCatalogItem, findItemByBarcode, rememberCode } from "@/lib/stash";
+import { recognizeText } from "@/modules/text-reader";
+import { Colors, Tint } from "@/theme/colors";
 import { Fonts, Radii, Space, Type } from "@/theme/type";
 
 export type ScanDraft = {
@@ -22,6 +24,12 @@ export type ScanDraft = {
   expirationDate: string; // YYYY-MM-DD or ""
   known: boolean; // matches an item already in this pantry
   inCatalog: boolean; // the code is already in the shared product catalog
+  /** Where the date came from: printed label, read off the package, estimated, or typed. */
+  expirySource: "label" | "package" | "estimated" | "manual" | null;
+  /** True when the date is a shelf-life guess staff should double-check. */
+  expiryEstimated: boolean;
+  /** Catalog facts for the scanned code (calories, allergens, tags, notes). */
+  facts: CatalogItem | null;
 };
 
 type Draft = ScanDraft;
@@ -31,7 +39,38 @@ export type ScanDone = { title: string; body: string };
 
 const EMPTY: Draft = {
   barcode: null, name: "", category: null, quantity: 1, expirationDate: "", known: false, inCatalog: false,
+  expirySource: null, expiryEstimated: false, facts: null,
 };
+
+/** Product facts from the catalog, shown on the form and saved with the item. */
+function Facts({ facts }: { facts: CatalogItem }) {
+  const pills = [
+    facts.unit_calories ? `${facts.unit_calories} kcal` : null,
+    facts.allergens.length ? `Contains ${facts.allergens.join(", ")}` : "No listed allergens",
+    ...facts.tags,
+  ].filter(Boolean) as string[];
+  return (
+    <View style={styles.facts}>
+      <Text style={Type.label}>FROM THE PRODUCT CATALOG</Text>
+      <View style={styles.factsRow}>
+        {pills.map((p) => <Text key={p} style={styles.factPill}>{p}</Text>)}
+      </View>
+      {facts.good_to_know.length > 0 && <Text style={Type.muted}>{facts.good_to_know.join("  ·  ")}</Text>}
+    </View>
+  );
+}
+
+/** Snap the current camera frame and look for a printed expiry date. */
+async function readExpiryFromPackage(camera: CameraView | null): Promise<string | null> {
+  if (!camera) return null;
+  try {
+    const photo = await camera.takePictureAsync({ quality: 0.6, skipProcessing: true, shutterSound: false });
+    if (!photo?.uri) return null;
+    return findExpiry(await recognizeText(photo.uri));
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Camera + QR/barcode lookup + item form, shared by staff and donor scanning.
@@ -62,6 +101,8 @@ export function ScanFlow({ pantryId, submitLabel, submitIcon = "package-variant-
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const lock = useRef(false);
+  const camera = useRef<CameraView>(null);
+  const [reading, setReading] = useState(false);
 
   const onScanned = async ({ data }: BarcodeScanningResult) => {
     if (lock.current || stage !== "camera") return;
@@ -72,18 +113,31 @@ export function ScanFlow({ pantryId, submitLabel, submitIcon = "package-variant-
       return;
     }
     const label = parseLabel(data);
-    const [existing, known] = await Promise.all([
+    setReading(true);
+    // Look the code up and, unless the label printed a date, read one off the package.
+    const [existing, known, packageDate] = await Promise.all([
       pantryId ? findItemByBarcode(pantryId, label.code).catch(() => null) : null,
       findCatalogItem(label.sku ?? label.code).catch(() => null),
+      label.expirationDate ? null : readExpiryFromPackage(camera.current),
     ]);
+    setReading(false);
+    // Expiry: printed on our label > read off the package > estimated from shelf life.
+    let expirationDate = "";
+    let expirySource: Draft["expirySource"] = null;
+    if (label.expirationDate) [expirationDate, expirySource] = [label.expirationDate, "label"];
+    else if (packageDate) [expirationDate, expirySource] = [packageDate, "package"];
+    else if (known?.shelf_life_days) [expirationDate, expirySource] = [addDays(known.shelf_life_days), "estimated"];
     setDraft({
       barcode: label.code,
       name: existing?.name ?? known?.name ?? "",
       category: (existing?.category as CategoryKey) ?? (known?.category as CategoryKey) ?? label.category,
       quantity: 1,
-      expirationDate: label.expirationDate ?? existing?.expiration_date ?? "",
+      expirationDate,
       known: Boolean(existing),
       inCatalog: Boolean(known),
+      expirySource,
+      expiryEstimated: expirySource === "estimated",
+      facts: known,
     });
     setStage("form");
   };
@@ -133,6 +187,7 @@ export function ScanFlow({ pantryId, submitLabel, submitIcon = "package-variant-
           style={StyleSheet.absoluteFill}
           active={focused && stage === "camera"}
           barcodeScannerSettings={{ barcodeTypes: ["qr", "ean13", "ean8", "upc_a", "upc_e", "code128"] }}
+          ref={camera}
           onBarcodeScanned={stage === "camera" ? onScanned : undefined}
         />
       ) : (
@@ -147,7 +202,7 @@ export function ScanFlow({ pantryId, submitLabel, submitIcon = "package-variant-
 
       <SafeAreaView style={styles.overlay} edges={["top"]} pointerEvents="box-none">
         <Text style={styles.hint}>
-          {stage === "camera" ? hint : " "}
+          {reading ? "Reading the package…" : stage === "camera" ? hint : " "}
         </Text>
         {stage === "camera" && topSlot}
         {stage === "camera" && permission?.granted && <View style={styles.frame} pointerEvents="none" />}
@@ -223,11 +278,31 @@ export function ScanFlow({ pantryId, submitLabel, submitIcon = "package-variant-
                   placeholder="YYYY-MM-DD"
                   placeholderTextColor={Colors.textMuted}
                   value={draft.expirationDate}
-                  onChangeText={(expirationDate) => setDraft((d) => ({ ...d, expirationDate }))}
+                  onChangeText={(expirationDate) =>
+                    setDraft((d) => ({ ...d, expirationDate, expirySource: "manual", expiryEstimated: false }))
+                  }
                   keyboardType="numbers-and-punctuation"
                 />
               </View>
             </View>
+            {draft.expirySource && draft.expirySource !== "manual" && (
+              <View style={[styles.dateNote, draft.expiryEstimated && styles.dateNoteWarn]}>
+                <MaterialCommunityIcons
+                  name={draft.expiryEstimated ? "alert-circle-outline" : "check-circle-outline"}
+                  size={18}
+                  color={draft.expiryEstimated ? Tint.mustard.ink : Tint.olive.ink}
+                />
+                <Text style={styles.dateNoteText}>
+                  {draft.expirySource === "package"
+                    ? "Date read from the package. Glance to make sure it's right."
+                    : draft.expirySource === "label"
+                      ? "Date from the Stash label."
+                      : `Estimated from typical shelf life (${draft.facts?.shelf_life_days} days). Check the package and fix it if needed; staff will double-check.`}
+                </Text>
+              </View>
+            )}
+
+            {draft.facts && <Facts facts={draft.facts} />}
 
             <ErrorText message={error} />
             <Button title={submitLabel} icon={submitIcon} onPress={save} loading={busy} />
@@ -267,6 +342,18 @@ const styles = StyleSheet.create({
   frame: {
     marginTop: 70, width: 250, height: 250, borderRadius: 28,
     borderWidth: 4, borderColor: Colors.white,
+  },
+  dateNote: {
+    flexDirection: "row", gap: 8, alignItems: "flex-start", padding: 10, borderRadius: 12,
+    backgroundColor: Tint.olive.bg, borderWidth: 1, borderColor: Tint.olive.border,
+  },
+  dateNoteWarn: { backgroundColor: Tint.mustard.bg, borderColor: Tint.mustard.border },
+  dateNoteText: { flex: 1, fontFamily: Fonts.bodySemi, fontSize: 13, color: Colors.text },
+  facts: { gap: 8, padding: 12, borderRadius: 14, backgroundColor: Colors.card, borderWidth: 1.5, borderColor: Colors.line },
+  factsRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  factPill: {
+    fontFamily: Fonts.bodyBold, fontSize: 12, color: Colors.text, backgroundColor: Colors.cardAlt,
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: Radii.pill, overflow: "hidden",
   },
   bottomBar: { position: "absolute", left: Space.gutter, right: Space.gutter, bottom: Space.xl, gap: Space.md },
   sheetWrap: { flex: 1, justifyContent: "flex-end" },

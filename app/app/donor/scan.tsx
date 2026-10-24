@@ -63,6 +63,7 @@ export default function DonorScan() {
           quantity: d.quantity,
           expirationDate: d.expirationDate || null,
           barcode: d.barcode,
+          expiryEstimated: d.expiryEstimated,
         }));
       const batchId = await submitDropoff(pantry.id, donorName, items);
       const slip: Slip = {

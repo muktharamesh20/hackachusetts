@@ -27,6 +27,7 @@ export default function Scan() {
           quantity: d.quantity,
           expirationDate: d.expirationDate || null,
           barcode: d.barcode,
+          expiryEstimated: d.expiryEstimated,
         });
         const label = d.quantity > 1 ? `${item.name} (${d.quantity})` : item.name;
         return { title: "All stashed!", body: `${label} added to inventory.` };
