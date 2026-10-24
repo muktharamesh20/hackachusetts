@@ -77,8 +77,8 @@ def default_rig() -> list[CameraSpec]:
             # limb. WORLD pose at rest: clear of the arm body, looking out over
             # the intake grid; it then rides shoulder_link (upright, yaws with
             # shoulder_pan). On a 4:3 sensor 160 deg horizontal ~ 125 deg vertical.
-            xyz=(0.12, 0.0, 0.22),
-            look_at=(0.25, 0.0, 0.02),
+            xyz=(0.16, 0.0, 0.055),
+            look_at=(0.32, 0.0, 0.0),
             width=1280,
             height=960,
             fov_y=np.radians(125.0),
