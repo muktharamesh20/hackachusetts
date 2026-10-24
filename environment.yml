@@ -1,0 +1,20 @@
+# Conda environment for PantrySort.
+# Creates a clean Python 3.11 env with ffmpeg (required by LeRobot for video
+# encoding) so pip installs of drake + lerobot go smoothly.
+#
+#   conda env create -f environment.yml
+#   conda activate pantrysort
+#   pip install -e ".[dev]"
+name: pantrysort
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip>=24.0
+  # ffmpeg with the libsvtav1 encoder is required by LeRobot for AV1 video.
+  - ffmpeg>=6.0
+  # System libs that help pydrake / opencv run cleanly across platforms.
+  - numpy>=1.24
+  - scipy>=1.10
+  - pip:
+      - -e ".[dev]"

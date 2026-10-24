@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.Python
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Environment / secrets
+.env
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+
+# Data / model artifacts
+data/
+outputs/
+checkpoints/
+wandb/
+*.ckpt
+*.pt
+*.safetensors
+
+# Drake / sim artifacts
+*.html
+meshcat_recording/
+
+# OS / editor
+.DS_Store
+.idea/
+*.swp

@@ -1,0 +1,28 @@
+# Runtime dependencies (pip fallback; prefer `pip install -e .` which reads pyproject.toml).
+# Pinned to compatible lower bounds. Use Python 3.10-3.12.
+
+# --- Simulation / manipulation ---
+drake>=1.30.0
+manipulation>=2024.0.0
+
+# --- Learned policies ---
+lerobot>=0.3.0
+
+# --- Core scientific stack ---
+numpy>=1.24
+scipy>=1.10
+pandas>=2.0
+
+# --- Perception / vision ---
+opencv-python>=4.8
+pillow>=10.0
+
+# --- Inventory / data ---
+pydantic>=2.5
+python-dateutil>=2.8
+sqlalchemy>=2.0
+
+# --- Config / CLI ---
+pyyaml>=6.0
+typer>=0.12
+rich>=13.0
