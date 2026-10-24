@@ -1,0 +1,40 @@
+-- Real Massachusetts food pantries from OpenStreetMap (© OpenStreetMap contributors, ODbL).
+-- Pulled 2026-10-24 via Overpass (social_facility/amenity = food_bank); missing towns
+-- filled by Nominatim reverse geocoding. These are NOT on Stash until someone claims them.
+insert into public.pantries (id, name, address, city, lat, lng, hours_note, website, phone) values
+    ('osm-n5642792422', 'Food Pantry', '20 Shank Painter Road', 'Provincetown, MA', 42.048870, -70.193832, null, null, null),
+    ('osm-n6952179888', 'Open Table', '', 'Maynard, MA', 42.432643, -71.451904, null, null, null),
+    ('osm-n7644223841', 'Immaculate Conception Church Assistance Center', '', 'Stoughton, MA', 42.122271, -71.096659, null, null, null),
+    ('osm-n8697962377', 'Southwick Food Pantry', '220 College Highway', 'Southwick, MA', 42.026753, -72.785364, null, null, null),
+    ('osm-n8964136229', 'Catholic Charities Food Distribution Center', '', 'Worcester, MA', 42.253426, -71.814438, null, null, null),
+    ('osm-n9064166583', 'Stow Food Pantry', '', 'Stow, MA', 42.437109, -71.518608, '"by appointment"', null, null),
+    ('osm-n10179135868', 'Interfaith Social Services', '', 'Quincy, MA', 42.256346, -71.009277, null, null, null),
+    ('osm-n10869912008', 'Arlington EATS', '117 Broadway', 'Arlington, MA', 42.410385, -71.140580, null, null, null),
+    ('osm-n11435728930', 'Community Food Pantry', '110 South Street', 'Pittsfield, MA', 42.446118, -73.254871, null, null, null),
+    ('osm-n11963970689', 'Yarmouth Food Pantry', '', 'Yarmouth, MA', 41.651817, -70.214212, null, null, null),
+    ('osm-n12105261753', 'Salem Pantry', '47 Leavitt Street', 'Salem, MA', 42.515085, -70.889493, 'Tu,Th,Fr 10:00-12:00,13:00-16:30; We 16:00-20:00; Sa 10:00-14:00', null, null),
+    ('osm-n12106141111', 'Bread of Life', '54 Eastern Avenue', 'Malden, MA', 42.424373, -71.066001, 'We,Fr 13:00-16:00', 'https://www.breadoflifemalden.org/', '+1-781-397-0404'),
+    ('osm-n13138332596', 'Ballard Vale Food Pantry', '', 'Andover, MA', 42.630136, -71.163541, null, 'https://www.villagefoodhub.org/pantry-program.html', null),
+    ('osm-n13168033122', 'Micro Pantry: Cary Square @ Temple Emmanuel', '60 Tudor Street', 'Chelsea, MA', 42.398252, -71.030389, '24/7', 'https://healthychelsea.org/food-security/', null),
+    ('osm-n13265241934', 'Micro Pantry: Iglesia La Luz de Cristo / SELAH Resource Center', '738 Broadway', 'Chelsea, MA', 42.396637, -71.027607, '24/7', 'https://healthychelsea.org/food-security/', null),
+    ('osm-n13265241935', 'Micro Pantry: CAPIC Head Start', '67 Crescent Avenue', 'Chelsea, MA', 42.395170, -71.028150, '24/7', 'https://healthychelsea.org/food-security/', null),
+    ('osm-n13265241936', 'Micro Pantry: Early Learning Center', '99 Hawthorn Street', 'Chelsea, MA', 42.389730, -71.034849, '24/7', 'https://healthychelsea.org/food-security/', null),
+    ('osm-n13265241937', 'Micro Pantry: Jordan Boys and Girls Club / Highland Park', '30 Willow Street', 'Chelsea, MA', 42.387476, -71.027261, '24/7', 'https://healthychelsea.org/food-security/', null),
+    ('osm-n13265241938', 'Micro Pantry: Senior Living at Bellingham Hill', '100 Bellingham Street', 'Chelsea, MA', 42.391516, -71.029270, '24/7', 'https://healthychelsea.org/food-security/', null),
+    ('osm-n13279780781', 'Micro Pantry: Washington Park', 'Washington Avenue', 'Chelsea, MA', 42.405802, -71.035438, '24/7', 'https://healthychelsea.org/food-security/', null),
+    ('osm-n13503041586', 'CHIP-IN', '', 'Charlton, MA', 42.134295, -71.968836, 'Sa[3] 09:00-12:00', 'http://charltonfoodpantry.org/', '+1 508-248-3292'),
+    ('osm-n13530066941', 'Allston-Brighton Food Pantry', '404 Washington Street', 'Brighton, MA', 42.348831, -71.155152, null, 'https://abfoodpantry.com/', null),
+    ('osm-n13537292673', 'Ginny''s Helping Hand', '', 'Leominster, MA', 42.526104, -71.757397, null, null, null),
+    ('osm-n14088719338', 'Dedham Food Pantry', '600 Washington Street', 'Dedham, MA', 42.241192, -71.178169, null, 'https://dedhamfoodpantry.org/', '+1 781 269 1541'),
+    ('osm-n14275508502', 'Hanover Food Pantry', '', 'Hanover, MA', 42.117377, -70.841911, null, null, null),
+    ('osm-n14292088863', 'West Boylston Ecumenical Food Pantry', '', 'West Boylston, MA', 42.364506, -71.782211, null, null, null),
+    ('osm-w150111758', 'Northampton Survival Center', '265 Prospect Street', 'Northampton, MA', 42.329801, -72.642427, null, null, null),
+    ('osm-w170278739', 'Food Link', '108 Summer Street', 'Arlington, MA', 42.419278, -71.158977, null, null, null),
+    ('osm-w215698150', 'St Joseph Food Pantry', '350 North Street', 'Pittsfield, MA', 42.453686, -73.251476, null, null, null),
+    ('osm-w216391998', 'The People First Food Pantry', '19 Douglas Street', 'Uxbridge, MA', 42.076955, -71.631393, null, null, null),
+    ('osm-w217245651', 'Amherst Survival Center', '138 Sunderland Road', 'Amherst, MA', 42.414695, -72.532882, 'Mo,Tu,Th,Fr 11:00-15:00; Th 11:00-19:00; We off; Sa[3] 09:30-11:30', 'https://amherstsurvival.org/', null),
+    ('osm-w1510684151', 'Food Bank of Western Massachusetts', '', 'Chicopee, MA', 42.155250, -72.559115, null, null, null)
+on conflict (id) do update set
+    name = excluded.name, address = excluded.address, city = excluded.city,
+    lat = excluded.lat, lng = excluded.lng, hours_note = excluded.hours_note,
+    website = excluded.website, phone = excluded.phone;

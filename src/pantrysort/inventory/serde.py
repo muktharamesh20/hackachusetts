@@ -18,6 +18,7 @@ from pantrysort.inventory.models import (
     StorageType,
     Transaction,
     TransactionType,
+    app_category,
 )
 
 
@@ -67,7 +68,8 @@ def item_to_row(item: InventoryItem) -> dict[str, Any]:
     return {
         "id": item.id,
         "name": item.name,
-        "category": item.category.value,
+        # The app groups shelves by its own categories; see models.app_category.
+        "category": app_category(item.category, item.name).value,
         "quantity": item.quantity,
         "unit_calories": item.unit_calories,
         "weight_grams": item.weight_grams,
@@ -106,6 +108,7 @@ def transaction_to_row(txn: Transaction) -> dict[str, Any]:
         "quantity": txn.quantity,
         "timestamp": txn.timestamp.isoformat(),
         "note": txn.note,
+        "item_name": txn.note or None,
     }
 
 

@@ -1,0 +1,70 @@
+[
+ {
+  "sku": "BEANS-BLK-CAN",
+  "name": "Black beans (can)"
+ },
+ {
+  "sku": "TUNA-CAN",
+  "name": "Tuna (can)"
+ },
+ {
+  "sku": "SPAGHETTI-BOX",
+  "name": "Spaghetti (box)"
+ },
+ {
+  "sku": "CEREAL-BOX",
+  "name": "Cereal (box)"
+ },
+ {
+  "sku": "RICE-BAG",
+  "name": "Rice (bag)"
+ },
+ {
+  "sku": "FORMULA-CAN",
+  "name": "Infant formula (can)"
+ },
+ {
+  "sku": "OLIVE-OIL",
+  "name": "Olive oil (bottle)"
+ },
+ {
+  "sku": "SALT",
+  "name": "Salt (shaker)"
+ },
+ {
+  "sku": "FLOUR-BAG",
+  "name": "Flour (bag)"
+ },
+ {
+  "sku": "PB-JAR",
+  "name": "Peanut butter (jar)"
+ },
+ {
+  "sku": "APPLE",
+  "name": "Apple"
+ },
+ {
+  "sku": "MILK-CARTON",
+  "name": "Milk (carton)"
+ },
+ {
+  "sku": "PEAS-FROZEN-BAG",
+  "name": "Frozen peas (bag)"
+ },
+ {
+  "sku": "TOOTHPASTE",
+  "name": "Toothpaste"
+ },
+ {
+  "sku": "SOAP-BAR",
+  "name": "Bar soap"
+ },
+ {
+  "sku": "TOILET-PAPER",
+  "name": "Toilet paper (roll)"
+ },
+ {
+  "sku": "SHAMPOO",
+  "name": "Shampoo"
+ }
+]
