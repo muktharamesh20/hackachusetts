@@ -135,7 +135,7 @@ class Station:
     item_shapes: dict[str, ItemShape] = field(default_factory=dict)
     realtime_rate: float = 1.0
     scanner: Any = None        # RgbdSensor on the gripper (None = rendering unavailable)
-    camera: Any = None         # overhead wide-FOV RgbdSensor (None = rendering unavailable)
+    cameras: dict = field(default_factory=dict)  # name -> RgbdSensor (localization rig)
     scan_display: Any = None   # ScanDisplay for Meshcat (None without Meshcat)
     _asset_dir: Any = None     # TemporaryDirectory holding generated sticker/card meshes
     _ik: Any = None
@@ -243,61 +243,54 @@ class Station:
 
     # ------------------------------------------------------------------ scanning
 
-    # ------------------------------------------------------------------ overhead camera
+    # ------------------------------------------------------------------ camera rig
 
-    def camera_model(self):
-        """CameraModel (intrinsics + world pose) for the overhead camera."""
+    def camera_names(self) -> list[str]:
+        return list(self.cameras.keys())
+
+    def _require_cam(self, name: str | None):
+        if not self.cameras:
+            return None
+        if name is None:
+            name = next(iter(self.cameras))
+        return self.cameras.get(name)
+
+    def camera_model(self, name: str | None = None):
+        """`CameraModel` (intrinsics + live world pose) for a rig camera."""
         from pantrysort.sim.camera import camera_model_from_sensor
 
-        if self.camera is None:
-            return None
-        return camera_model_from_sensor(self.camera, self.context)
+        cam = self._require_cam(name)
+        return None if cam is None else camera_model_from_sensor(cam, self.context)
 
-    def camera_rgb(self) -> np.ndarray | None:
-        """Undistorted (pinhole) RGBA frame from the overhead camera."""
-        if self.camera is None:
+    def camera_rgb(self, name: str | None = None) -> np.ndarray | None:
+        """Undistorted (pinhole) RGBA frame from a rig camera."""
+        cam = self._require_cam(name)
+        if cam is None:
             return None
-        ctx = self.camera.GetMyContextFromRoot(self.context)
-        return np.array(self.camera.color_image_output_port().Eval(ctx).data, copy=True)
+        ctx = cam.GetMyContextFromRoot(self.context)
+        return np.array(cam.color_image_output_port().Eval(ctx).data, copy=True)
 
-    def camera_depth(self) -> np.ndarray | None:
-        """Depth (float32, meters) frame from the overhead camera."""
-        if self.camera is None:
+    def camera_depth(self, name: str | None = None) -> np.ndarray | None:
+        """Depth (float32, meters) frame from a rig camera."""
+        cam = self._require_cam(name)
+        if cam is None:
             return None
-        ctx = self.camera.GetMyContextFromRoot(self.context)
-        return np.array(self.camera.depth_image_32F_output_port().Eval(ctx).data, copy=True)
+        ctx = cam.GetMyContextFromRoot(self.context)
+        return np.array(cam.depth_image_32F_output_port().Eval(ctx).data, copy=True)
 
-    def camera_fisheye(self) -> np.ndarray | None:
+    def camera_fisheye(self, name: str | None = None) -> np.ndarray | None:
         """Fisheye-distorted RGBA frame (cosmetic; for a perception policy)."""
         from pantrysort.sim.camera import apply_fisheye
 
-        rgb = self.camera_rgb()
+        rgb = self.camera_rgb(name)
         if rgb is None:
             return None
-        return apply_fisheye(rgb, self.camera_model())
+        return apply_fisheye(rgb, self.camera_model(name))
 
-    def qr_locator(self):
-        """A Locator for QrClassifierBackend: decoded QR -> world grasp point.
-
-        Uses the overhead camera's depth to back-project the QR's pixel center.
-        Falls back to the item's intake position if depth is missing. This is the
-        seam that lets perception drive the arm from camera data instead of
-        ground-truth scene coordinates.
-        """
-
-        def _locate(decoded) -> tuple[float, float, float]:
-            u, v = decoded.center_px
-            p = self.locate_pixel(u, v)
-            if p is None:
-                # Fall back to the scene centroid so the pipeline still proceeds.
-                return (0.22, 0.0, 0.03)
-            return (float(p[0]), float(p[1]), float(p[2]))
-
-        return _locate
-    def locate_pixel(self, u: float, v: float) -> np.ndarray | None:
-        """Back-project pixel (u, v) using the camera depth into a world point."""
-        model = self.camera_model()
-        depth = self.camera_depth()
+    def locate_pixel(self, u: float, v: float, name: str | None = None) -> np.ndarray | None:
+        """Back-project pixel (u, v) in camera `name` to a world point via depth."""
+        model = self.camera_model(name)
+        depth = self.camera_depth(name)
         if model is None or depth is None:
             return None
         row, col = int(round(v)), int(round(u))
@@ -307,6 +300,24 @@ class Station:
         if not np.isfinite(d) or d <= 0:
             return None
         return model.pixel_to_world(u, v, d)
+
+    def qr_locator(self, name: str | None = None):
+        """A `Locator` for `QrClassifierBackend`: decoded QR -> world point.
+
+        Back-projects the QR's pixel center through camera `name`'s depth.
+        Falls back to the intake centroid if depth is missing so the pipeline
+        still proceeds. This is the seam that lets perception drive the arm from
+        camera data instead of ground-truth scene coordinates.
+        """
+
+        def _locate(decoded) -> tuple[float, float, float]:
+            u, v = decoded.center_px
+            p = self.locate_pixel(u, v, name)
+            if p is None:
+                return (0.22, 0.0, 0.03)
+            return (float(p[0]), float(p[1]), float(p[2]))
+
+        return _locate
     def scanner_image(self) -> np.ndarray | None:
         """Current RGBA frame from the gripper's QR scanner camera."""
         if self.scanner is None:
@@ -532,12 +543,6 @@ def _add_scanner(builder, plant, scene_graph):
     return sensor
 
 
-def _add_overhead_camera(builder, plant, scene_graph):
-    """Add the wide-FOV overhead localization camera; None if VTK is unavailable."""
-    from pantrysort.sim.camera import add_camera
-
-    return add_camera(builder, plant, scene_graph, name="overhead_camera")
-
 def build_station(
     scene: PantryScene | None = None, config: SimConfig | None = None
 ) -> Station:
@@ -590,11 +595,11 @@ def build_station(
 
     plant.Finalize()
     scanner = _add_scanner(builder, plant, scene_graph) if config.qr_scanner else None
-    camera = (
-        _add_overhead_camera(builder, plant, scene_graph)
-        if getattr(config, "overhead_camera", False)
-        else None
-    )
+    cameras: dict[str, Any] = {}
+    if getattr(config, "overhead_camera", True):
+        from pantrysort.sim.camera import add_rig, default_rig
+
+        cameras = add_rig(builder, plant, scene_graph, default_rig())
 
     meshcat = None
     if config.meshcat:
@@ -629,7 +634,7 @@ def build_station(
         item_shapes={item.label: item.shape for item in scene.items},
         realtime_rate=config.realtime_rate,
         scanner=scanner,
-        camera=camera,
+        cameras=cameras,
         _asset_dir=asset_dir,
         _ik=_ArmIK(),
     )
