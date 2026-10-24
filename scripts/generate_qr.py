@@ -5,7 +5,8 @@ Usage:
     python scripts/generate_qr.py --sku MILK-CARTON --exp 2026-11-03 --lot A1
     python scripts/generate_qr.py --out-dir /tmp/qr --scale 12
 
-If --exp is omitted, expiry is today + the catalog's shelf_life_days. Each PNG is
+Each label carries sku, expiry, lot, category, calories, and allergens. If
+--exp is omitted, expiry is today + the catalog's shelf_life_days. Each PNG is
 verified by decoding it back before the script reports success.
 """
 
@@ -17,8 +18,12 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from pantrysort.perception.catalog import DEFAULT_CATALOG_PATH, FoodCatalog
-from pantrysort.perception.qr import decode_qr_codes, make_qr_image, save_qr_png
-from pantrysort.perception.qr_payload import FoodQrPayload
+from pantrysort.perception.qr import (
+    decode_qr_codes,
+    make_qr_image,
+    payload_for_entry,
+    save_qr_png,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -46,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
         if exp is None and entry.shelf_life_days is not None:
             exp = today + timedelta(days=entry.shelf_life_days)
 
-        payload = FoodQrPayload(sku=sku, expiration_date=exp, lot=args.lot)
+        payload = payload_for_entry(entry, exp, args.lot)
         path = save_qr_png(payload, args.out_dir / f"{sku}.png", scale=args.scale)
 
         # Round-trip check so we never ship an unreadable label.
