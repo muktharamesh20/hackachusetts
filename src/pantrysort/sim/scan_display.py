@@ -24,8 +24,8 @@ import numpy as np
 from pantrysort.perception.classifier import Detection
 from pantrysort.perception.qr_payload import FoodQrPayload
 
-LABEL_MAX_SIZE = 0.036   # QR sticker edge (m); big enough to decode from ~9 cm
-LABEL_FILL = 0.92        # sticker edge as a fraction of the item's smaller top dimension
+LABEL_MAX_SIZE = 0.026   # QR sticker edge (m); decodes reliably from ~5-7.5 cm
+LABEL_FILL = 0.70        # sticker edge as a fraction of the item's smaller top dimension
 LABEL_LIFT = 0.0008      # sticker sits this far above the item's bounding box top (m)
 
 

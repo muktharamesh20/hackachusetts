@@ -38,6 +38,8 @@ def main() -> None:
 
     scanned = sum(1 for s in result.scans if s.source == "camera" and s.payload is not None)
     print(f"\nSorted {result.num_sorted} item(s); {scanned} identified by QR camera scan.")
+    for label, counts in result.boxes:
+        print(f"  {label}: " + ", ".join(f"{n} -> {loc}" for loc, n in counts.items()))
     if result.discarded:
         print(f"{len(result.discarded)} expired item(s) sent to the discard bin: "
               + ", ".join(i.name for i in result.discarded))

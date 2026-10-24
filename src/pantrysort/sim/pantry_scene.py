@@ -104,6 +104,9 @@ class SceneItem:
     yaw: float = 0.0  # rotation about z on the intake mat (rad)
     # What's printed on the QR sticker on top of the item (None = no sticker).
     qr: FoodQrPayload | None = None
+    # Index into PantryScene.boxes if the item arrives in a donation box. Then
+    # ``position``/``yaw`` are its pose once the box is at the pick station.
+    box: int | None = None
 
     def to_detection(self, today: date | None = None,
                      catalog: FoodCatalog | None = None) -> Detection:
@@ -127,14 +130,29 @@ class SceneItem:
         )
 
 
+@dataclass(frozen=True)
+class DonationBox:
+    """An open cardboard box of mixed donations that rides the conveyor."""
+
+    label: str
+    lot: str
+
+
 @dataclass
 class PantryScene:
     items: list[SceneItem] = field(default_factory=list)
     locations: list[StorageLocation] = field(default_factory=list)
+    # Donation boxes on the conveyor, in arrival order. Empty = items sit on a
+    # flat intake mat instead (no conveyor).
+    boxes: list[DonationBox] = field(default_factory=list)
 
     def detections(self, today: date | None = None) -> list[Detection]:
         catalog = FoodCatalog.load() if any(it.qr for it in self.items) else None
         return [item.to_detection(today, catalog) for item in self.items]
+
+    def box_items(self, box: int) -> list[SceneItem]:
+        """Items packed in donation box ``box``, in unpacking order."""
+        return [it for it in self.items if it.box == box]
 
 
 # Expired items aren't stocked: they go to this bin and are logged as discarded.
@@ -246,43 +264,146 @@ def scene_from_skus(skus: list[str] | tuple[str, ...],
     return PantryScene(items=items, locations=list(DEFAULT_LOCATIONS))
 
 
+# --------------------------------------------------------------------------- conveyor
+#
+# A belt runs past the front of the arm along y, carrying donation boxes toward
+# -y. Each box stops at the pick station (y = STATION_Y) in front of the arm, is
+# unpacked, then rides on downstream as the next box comes in. The category
+# bins sit beside and behind the arm, clear of the belt (x < 0.11).
+
+BELT_X = 0.235              # belt centerline (m)
+BELT_WIDTH = 0.23
+BELT_HALF_LENGTH = 1.25     # belt runs y in [-1.25, 1.25]
+BELT_TOP = 0.012            # low tabletop conveyor; keeps tall items in the SO-101's reach
+STATION_Y = 0.0             # where a box stops to be unpacked
+BOX_PITCH = 0.30            # spacing between boxes queued on the belt
+DONATION_BOX_SIZE = (0.20, 0.24, 0.035)  # outer (x, y, wall height), open top
+BOX_WALL = 0.004            # cardboard thickness (walls and floor)
+BOX_FLOOR_TOP = BELT_TOP + BOX_WALL      # items rest here
+
+# Item slots in a box at the pick station: (dx, dy) from the box center.
+# Row 0 is nearer the arm; tall items go in row 1, where the arm reaches higher.
+BOX_ROWS_DX = (-0.045, 0.045)
+BOX_COLS_DY = (-0.075, 0.0, 0.075)
+
+# One spec per donation box: (label, [(sku, row, col), ...]) in unpacking order.
+DEFAULT_DONATIONS: tuple[tuple[str, tuple[tuple[str, int, int], ...]], ...] = (
+    ("Donation box 1", (
+        ("TOOTHPASTE", 0, 0), ("APPLE", 0, 1), ("SPAGHETTI-BOX", 0, 2),
+        ("BEANS-BLK-CAN", 1, 0), ("MILK-CARTON", 1, 2),
+    )),
+    ("Donation box 2", (
+        ("SOAP-BAR", 0, 0), ("TUNA-CAN", 0, 1), ("PEAS-FROZEN-BAG", 0, 2),
+        ("CEREAL-BOX", 1, 1),
+    )),
+    ("Donation box 3", (
+        ("APPLE", 0, 1),
+        ("TOILET-PAPER", 1, 0), ("RICE-BAG", 1, 1), ("PB-JAR", 1, 2),
+    )),
+)
+
+
+def box_station_pose(box: int = 0) -> tuple[float, float, float]:
+    """Center of a donation box's floor (bottom face) when it's at the pick station."""
+    del box  # every box stops at the same place
+    return (BELT_X, STATION_Y, BELT_TOP)
+
+
+def donation_scene(donations=DEFAULT_DONATIONS, catalog: FoodCatalog | None = None,
+                   today: date | None = None,
+                   expiry_offsets: dict[str, int] | None = None) -> PantryScene:
+    """Donation boxes of mixed products arriving on the conveyor.
+
+    Each item gets a QR sticker (sku, expiry, the box's lot, category, calories,
+    allergens). ``expiry_offsets[sku]`` overrides the catalog shelf life (days).
+    """
+    from pantrysort.perception.qr import payload_for_entry
+
+    catalog = catalog or FoodCatalog.load()
+    today = today or date.today()
+    offsets = expiry_offsets or {}
+    bx, by, _ = box_station_pose()
+    boxes: list[DonationBox] = []
+    items: list[SceneItem] = []
+    for k, (label, contents) in enumerate(donations):
+        box = DonationBox(label=label, lot=f"D{today:%y%m%d}-{k + 1}")
+        boxes.append(box)
+        used: set[tuple[int, int]] = set()
+        for sku, row, col in contents:
+            if (row, col) in used:
+                raise ValueError(f"{label}: slot ({row}, {col}) used twice")
+            used.add((row, col))
+            entry = catalog.get(sku)
+            if entry is None:
+                raise KeyError(f"sku {sku!r} not in catalog")
+            shape = get_shape(entry.shape or "box")
+            days = offsets.get(sku, entry.shelf_life_days)
+            exp = today + timedelta(days=days) if days is not None else None
+            x, y = bx + BOX_ROWS_DX[row], by + BOX_COLS_DY[col]
+            items.append(SceneItem(
+                label=f"{entry.name} [{k + 1}]",  # unique: the same product can recur
+                category=entry.category,
+                position=(x, y, BOX_FLOOR_TOP + shape.size[2] / 2),
+                unit_calories=entry.unit_calories,
+                shelf_life_days=days,
+                allergens=entry.allergens,
+                barcode=sku,
+                shape=shape,
+                yaw=facing_yaw(x, y),
+                qr=payload_for_entry(entry, exp, box.lot),
+                box=k,
+            ))
+    return PantryScene(items=items, locations=list(DEFAULT_LOCATIONS), boxes=boxes)
+
+
 def default_scene(today: date | None = None) -> PantryScene:
-    """A representative mixed donation bin for demos and tests."""
+    """Three mixed donation boxes arriving on the conveyor (demos and tests)."""
+    return donation_scene(today=today, expiry_offsets=DEFAULT_EXPIRY_OFFSETS)
+
+
+def intake_scene(today: date | None = None) -> PantryScene:
+    """The earlier layout: nine items on a flat intake mat, no conveyor."""
     return scene_from_skus(DEFAULT_SKUS, today=today, expiry_offsets=DEFAULT_EXPIRY_OFFSETS)
 
 
+# --------------------------------------------------------------------------- bins
+#
 # Layout is sized for the SO-101 arm (base at the origin, facing +x, ~0.35 m
 # reach, shoulder_pan limited to about +/-110 degrees).
-PAD_HEIGHT = 0.01  # storage pads are thin platforms
+PAD_HEIGHT = 0.004  # bin floor thickness: items placed in a bin rest at this height
+BIN_WALL_HEIGHT = 0.03
+BIN_WALL = 0.004
 
 
 def _ring_point(radius: float, angle_deg: float) -> tuple[float, float, float]:
     """Point on a pad's top surface, in polar coordinates about the shoulder_pan axis.
 
-    Keep ``|angle_deg|`` <= ~100: shoulder_pan is limited to about +/-110 degrees.
+    Keep ``|angle_deg|`` <= ~108: shoulder_pan is limited to about +/-110 degrees.
     """
     a = math.radians(angle_deg)
     return (round(PAN_AXIS_XY[0] + radius * math.cos(a), 4),
             round(PAN_AXIS_XY[1] + radius * math.sin(a), 4), PAD_HEIGHT)
 
 
-# World-frame points on each storage pad's top surface (m), arranged in a ring
-# on either side of the intake area. An item placed there has its center at
-# surface + height/2 (plus whatever is already stacked).
+# Center of each category bin's floor (m). Bins sit beside and behind the arm,
+# out of the conveyor's way: an outer pair per side at 0.30 m and one inner bin
+# per side at 0.175 m. Bins that receive tall items are on the outer ring, where
+# the SO-101 reaches highest. An item placed in a bin has its center at floor +
+# height/2 (plus whatever is already stacked).
 LOCATION_DROP_POINTS: dict[str, tuple[float, float, float]] = {
-    "shelf-canned": _ring_point(0.24, 44),
-    "shelf-dry": _ring_point(0.24, 72),
-    "bin-misc": _ring_point(0.24, 100),
-    "fridge": _ring_point(0.24, -44),
-    "freezer": _ring_point(0.24, -72),
-    DISCARD_LOCATION_ID: _ring_point(0.24, -100),
+    "shelf-canned": _ring_point(0.30, 86),
+    "shelf-dry": _ring_point(0.30, 108),
+    "bin-misc": _ring_point(0.175, 97),
+    "fridge": _ring_point(0.30, -86),
+    "freezer": _ring_point(0.30, -108),
+    DISCARD_LOCATION_ID: _ring_point(0.175, -97),
 }
 
-# Each pad has two slots along the radial direction (inner, outer); further items
-# stack on top. Items are placed with their long x axis tangential and their
-# grip width (y, <= 6 cm) radial, so two fit side by side.
-PAD_SLOT_OFFSETS = (-0.031, 0.031)
-PAD_SIZE = (0.125, 0.085)  # (radial, tangential) in m
+# Each bin has two slots along the radial direction (inner, outer); further items
+# stack on the lower slot. Items are placed with their long x axis tangential and
+# their grip width (y, <= 6 cm) radial, so two fit side by side.
+PAD_SLOT_OFFSETS = (-0.028, 0.028)
+PAD_SIZE = (0.11, 0.09)  # bin outer (radial, tangential) in m
 
 
 def pad_slot(location_id: str, slot: int) -> tuple[float, float, float, float]:
@@ -295,17 +416,16 @@ def pad_slot(location_id: str, slot: int) -> tuple[float, float, float, float]:
 
 
 class PadLayout:
-    """Tracks what's on each pad: fills slots in turn, then stacks on the lowest."""
+    """Tracks what's in each bin: each item goes on the lower of its two slots."""
 
     def __init__(self) -> None:
         self._tops: dict[tuple[str, int], float] = {}
-        self._count: dict[str, int] = {}
 
     def place(self, location_id: str, item_height: float) -> tuple[tuple[float, float, float], float]:
         """Reserve a spot; returns (item center position, yaw)."""
-        n = self._count.get(location_id, 0)
-        self._count[location_id] = n + 1
-        slot = n % len(PAD_SLOT_OFFSETS)
+        floor = LOCATION_DROP_POINTS.get(location_id, (0.0, 0.0, 0.0))[2]
+        slot = min(range(len(PAD_SLOT_OFFSETS)),
+                   key=lambda s: (self._tops.get((location_id, s), floor), s))
         x, y, pad_top, yaw = pad_slot(location_id, slot)
         bottom = self._tops.get((location_id, slot), pad_top)
         self._tops[(location_id, slot)] = bottom + item_height

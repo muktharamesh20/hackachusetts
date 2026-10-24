@@ -73,7 +73,8 @@ def test_catalog_covers_default_scene(catalog):
     for item in default_scene().items:
         entry = catalog.get(item.barcode)
         assert entry is not None, item.barcode
-        assert entry.name == item.label
+        # Donation-box labels carry a " [box]" suffix so repeated products stay unique.
+        assert item.label.split(" [")[0] == entry.name
         assert entry.category == item.category
         assert entry.allergens == item.allergens
 
