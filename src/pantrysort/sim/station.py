@@ -98,6 +98,14 @@ SCANNER_FOV_Y = np.radians(45)
 # longer fits in the 45 degree view.
 SCAN_DISTANCES = (0.09, 0.08, 0.10, 0.07)
 
+# Motion limits for smooth, non-glitchy kinematic moves. The arm is driven by
+# setting joint angles directly, so we cap how far each joint may move per
+# simulated second (velocity) and how fast that rate may change (acceleration),
+# then interpolate every move to respect them.
+MAX_JOINT_SPEED = 2.5       # rad/s per joint
+MAX_JOINT_ACCEL = 8.0       # rad/s^2 per joint
+MAX_JOINT_STEP = 0.15       # hard cap on |dq| applied in a single move_ee_to call (rad)
+
 # Default Meshcat viewpoint (the scan card is placed to face it).
 MESHCAT_CAMERA = np.array([0.55, -0.45, 0.45])
 MESHCAT_TARGET = np.array([0.1, 0.0, 0.05])
@@ -174,14 +182,56 @@ class Station:
         self._closed_q = gripper_angle_for_width(width)
 
     def move_ee_to(self, p_W: np.ndarray) -> bool:
-        """IK the arm so the grasp point reaches ``p_W`` with the gripper pointing roughly down."""
-        q, ok = self._ik.solve(np.asarray(p_W, dtype=float), self.joint_positions(),
-                               self._grasp_offset)
+        """IK the arm so the grasp point reaches ``p_W`` with the gripper pointing roughly down.
+
+        The per-call joint change is clamped (``MAX_JOINT_STEP``) so an IK jump
+        (e.g. an elbow flip between nearby targets) eases over several calls
+        instead of snapping.
+        """
+        q0 = self.joint_positions()
+        q, ok = self._ik.solve(np.asarray(p_W, dtype=float), q0, self._grasp_offset)
         if not ok:
             logger.debug("IK did not converge for %s; keeping best effort.", p_W)
+        q = _clamp_joint_step(q0, q, MAX_JOINT_STEP, self._ik.gripper_index)
         self.plant.SetPositions(self.plant_context, self.arm, q)
         self._update_held()
         return ok
+
+    def move_ee_to_smooth(self, p_W: np.ndarray, dt: float,
+                          max_speed: float = MAX_JOINT_SPEED,
+                          max_accel: float = MAX_JOINT_ACCEL) -> bool:
+        """IK to ``p_W`` then interpolate there under velocity/acceleration caps,
+        publishing each frame. Use for visibly smooth moves (demos, presenting)."""
+        q0 = self.joint_positions()
+        q_goal, ok = self._ik.solve(np.asarray(p_W, dtype=float), q0, self._grasp_offset)
+        q_goal[self._ik.gripper_index] = q0[self._ik.gripper_index]
+        self._ramp_to(q_goal, dt, max_speed, max_accel)
+        return ok
+
+    def _ramp_to(self, q_goal: np.ndarray, dt: float, max_speed: float,
+                 max_accel: float) -> None:
+        """Interpolate joints to ``q_goal`` with trapezoidal velocity limiting
+        (caps speed and acceleration), publishing each step."""
+        q = self.joint_positions().astype(float)
+        q_goal = np.asarray(q_goal, dtype=float)
+        vel = np.zeros_like(q)
+        max_dv = max_accel * dt
+        guard = 0
+        while guard < 2000:
+            guard += 1
+            err = q_goal - q
+            if np.all(np.abs(err) <= 1e-4) and np.all(np.abs(vel) <= 1e-4):
+                break
+            desired_v = np.clip(err / dt, -max_speed, max_speed)
+            # Decelerate near the goal so we stop cleanly (no overshoot).
+            stop_v = np.sign(err) * np.sqrt(np.maximum(2 * max_accel * np.abs(err), 0.0))
+            desired_v = np.clip(desired_v, -np.abs(stop_v), np.abs(stop_v))
+            dv = np.clip(desired_v - vel, -max_dv, max_dv)
+            vel = np.clip(vel + dv, -max_speed, max_speed)
+            q = q + vel * dt
+            self.plant.SetPositions(self.plant_context, self.arm, q)
+            self._update_held()
+            self.publish(dt)
 
     def set_gripper(self, closedness: float) -> None:
         """0 = fully open, 1 = closed on an item."""
@@ -711,6 +761,16 @@ def build_station(
     diagram.ForcedPublish(station.context)
     return station
 
+
+def _clamp_joint_step(q_from, q_to, max_step, gripper_index=None):
+    """Limit |q_to - q_from| per joint to `max_step` rad (gripper exempt)."""
+    q_from = np.asarray(q_from, dtype=float)
+    q_to = np.asarray(q_to, dtype=float)
+    dq = np.clip(q_to - q_from, -max_step, max_step)
+    out = q_from + dq
+    if gripper_index is not None:
+        out[gripper_index] = q_to[gripper_index]  # jaw commands are not rate-limited
+    return out
 
 def _safe_name(label: str) -> str:
     return "item_" + "".join(c if c.isalnum() else "_" for c in label).strip("_").lower()

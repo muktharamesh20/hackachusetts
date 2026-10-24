@@ -84,15 +84,15 @@ def default_rig() -> list[CameraSpec]:
             fov_y=np.radians(125.0),
         ),
         # External iPhone back cameras (main ~26mm-equiv, 4:3, low distortion)
-        # at the front corners of the intake grid, ~0.30 m out and angled inward:
-        # close enough to decode side stickers (and for the arm to lift an item
-        # up to), but off to the corners so they do not block the arm's forward
-        # or side swing. look_at is also the world point each is meant to watch.
+        # standing ON THE GROUND at the front corners, ~0.5 m out, looking up and
+        # inward at the intake grid. Close enough to decode side stickers and for
+        # the arm to lower an item in front of; off to the corners so they do not
+        # block the arm's swing. look_at is also the point each is meant to watch.
         CameraSpec(
             name="iphone_left",
             mount="world",
-            xyz=(0.34, -0.26, 0.18),
-            look_at=(0.22, 0.0, 0.03),
+            xyz=(0.40, -0.30, 0.03),
+            look_at=(0.22, 0.0, 0.05),
             width=1280,
             height=960,
             fov_y=IPHONE_FOV_Y,
@@ -101,8 +101,8 @@ def default_rig() -> list[CameraSpec]:
         CameraSpec(
             name="iphone_right",
             mount="world",
-            xyz=(0.34, 0.26, 0.18),
-            look_at=(0.22, 0.0, 0.03),
+            xyz=(0.40, 0.30, 0.03),
+            look_at=(0.22, 0.0, 0.05),
             width=1280,
             height=960,
             fov_y=IPHONE_FOV_Y,

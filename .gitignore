@@ -25,6 +25,7 @@ htmlcov/
 # Data / model artifacts
 data/
 outputs/
+camera_diagnostics/        # saved camera frames from scripts/camera_diagnostic.py
 checkpoints/
 wandb/
 *.ckpt

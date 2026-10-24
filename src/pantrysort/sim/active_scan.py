@@ -63,44 +63,62 @@ def _read_presented(station, camera_name, expected_world=None,
     return best.text, frame, camera_name
 
 
-def present_and_read(station, item_label: str, dt: float = 0.05):
-    """Grasp ``item_label``, hold it in front of each camera, and decode its QR.
+PRESENT_DISTANCES = (0.14, 0.18, 0.12, 0.16)  # tried in order; first reachable wins
 
-    Returns ``(text, image, camera)`` on success or ``None``. Leaves the item
-    held (the caller can then place it); if nothing decodes, the item is set
-    back down near where it was so the normal pick-and-place can proceed.
+
+def present_and_read(station, item_label: str, dt: float = 0.05, hold_frames: int = SETTLE_FRAMES,
+                     on_capture=None, cameras=None):
+    """Grasp `item_label`, present it to each camera, and decode its QR.
+
+    Motion uses the velocity/acceleration-limited `move_ee_to_smooth` so the
+    arm glides rather than snaps. `hold_frames` keeps the item still in front
+    of the camera (raise it in testing so the rendered frame is crisp).
+    `on_capture(camera_name, item_label)` is called while the item is held and
+    settled, for a caller that wants to save frames. `cameras` restricts which
+    rig cameras to present to (default: all).
+
+    Returns `(text, image, camera)` on success or `None`. The item is set
+    back to its original pose and released before returning, so the normal
+    pick-and-place can grasp it afterwards.
     """
     body = station.item_bodies.get(item_label)
     if body is None:
         return None
-    X_orig = station._body_pose(body)  # restore the item here after scanning
+    X_orig = station._body_pose(body)
 
-    # 1) Grasp: go to the item, close, attach.
+    # 1) Grasp: glide to the item, close, attach.
     p_item = np.asarray(station._body_pose(body).translation(), dtype=float)
     shape = station.item_shapes.get(item_label)
     if shape is not None:
         station.prepare_grasp(shape.grip_width)
-    station.move_ee_to(p_item)
-    for _ in range(SETTLE_FRAMES):
+    station.move_ee_to_smooth(p_item, dt)
+    for _ in range(hold_frames):
         station.publish(dt)
     station.set_gripper(1.0)
     grabbed = station.attach_nearest()
     station.publish(dt)
     if grabbed is None:
         logger.debug("present_and_read: failed to grasp %s", item_label)
+        station.detach()
+        station.plant.SetFreeBodyPose(station.plant_context, body, X_orig)
         return None
 
-    # 2) Present to each camera in turn, reading after the move.
+    names = cameras if cameras is not None else station.camera_names()
     result = None
-    for name in station.camera_names():
-        target = present_point_for_camera(station, name)
+    for name in names:
+        target = None
+        for dist in PRESENT_DISTANCES:
+            cand = present_point_for_camera(station, name, dist)
+            if cand is not None and _reachable(station, cand):
+                target = cand
+                break
         if target is None:
             continue
-        if not _reachable(station, target):
-            continue
-        station.move_ee_to(target)
-        for _ in range(SETTLE_FRAMES):
+        station.move_ee_to_smooth(target, dt)
+        for _ in range(hold_frames):
             station.publish(dt)
+        if on_capture is not None:
+            on_capture(name, item_label)
         held_pos = np.asarray(station._body_pose(body).translation(), dtype=float)
         hit = _read_presented(station, name, expected_world=held_pos)
         if hit is not None:
@@ -108,8 +126,7 @@ def present_and_read(station, item_label: str, dt: float = 0.05):
             result = hit
             break
 
-    # Put the item back exactly where it was and release, so the normal
-    # pick-and-place can grasp it from its intake slot.
+    # Return the item to its slot and release.
     station.detach()
     station.plant.SetFreeBodyPose(station.plant_context, body, X_orig)
     station.set_gripper(0.0)
@@ -118,11 +135,20 @@ def present_and_read(station, item_label: str, dt: float = 0.05):
 
 
 def _reachable(station, p_world, tol: float = 0.05) -> bool:
-    """Quick check: does moving the grasp point to ``p_world`` land near it?"""
-    before = station.joint_positions().copy()
-    ok = station.move_ee_to(np.asarray(p_world, dtype=float))
-    reached = station.ee_position()
-    hit = bool(np.linalg.norm(reached - np.asarray(p_world, dtype=float)) < tol)
-    # restore
-    station.plant.SetPositions(station.plant_context, station.arm, before)
-    return ok and hit
+    """Does IK place the grasp point within `tol` of `p_world`?
+
+    Uses the IK solver directly (not a rate-limited move) and checks forward
+    kinematics on a scratch context, so it does not disturb the live arm.
+    """
+    p_world = np.asarray(p_world, dtype=float)
+    q, ok = station._ik.solve(p_world, station.joint_positions(), station._grasp_offset)
+    if not ok:
+        return False
+    # Evaluate the grasp point at q on the IK's own plant/context.
+    ik = station._ik
+    ik.plant.SetPositions(ik.context, ik.arm, q)
+    X = ik.plant.CalcRelativeTransform(
+        ik.context, ik.plant.world_frame(), ik.plant.GetFrameByName("gripper_frame_link")
+    )
+    reached = np.asarray(X.multiply(station._grasp_offset), dtype=float)
+    return bool(np.linalg.norm(reached - p_world) < tol)
