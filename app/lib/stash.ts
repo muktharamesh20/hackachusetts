@@ -17,6 +17,8 @@ export type Pantry = {
   website: string | null;
   phone: string | null;
   image_key: string | null;
+  image_credit: string | null;
+  image_credit_url: string | null;
   donate_url: string | null;
 };
 
@@ -368,6 +370,32 @@ export const fetchPendingDropoffs = (pantryId: string) =>
       .eq("status", "pending")
       .order("created_at", { ascending: false }),
   );
+
+/** Recently checked-in drop-offs at a pantry (for the Drop-offs page history). */
+export const fetchAcceptedDropoffs = (pantryId: string, limit = 60) =>
+  run<(Dropoff & { reviewed_at: string | null })[]>(
+    supabase
+      .from("dropoff_items")
+      .select("id,batch_id,donor_name,pantry_id,name,category,quantity,expiration_date,barcode,created_at,reviewed_at")
+      .eq("pantry_id", pantryId)
+      .eq("status", "accepted")
+      .order("reviewed_at", { ascending: false })
+      .limit(limit),
+  );
+
+export type Bag = { id: string; donor: string; units: number; names: string; at: string };
+
+/** Group drop-off rows by donor bag (newest first, as given). */
+export function groupBags(rows: Dropoff[]): Bag[] {
+  const map = new Map<string, Bag>();
+  for (const d of rows) {
+    const b = map.get(d.batch_id) ?? { id: d.batch_id, donor: d.donor_name ?? "A neighbor", units: 0, names: "", at: d.created_at };
+    b.units += d.quantity;
+    b.names = b.names ? `${b.names}, ${d.name}` : d.name;
+    map.set(d.batch_id, b);
+  }
+  return [...map.values()];
+}
 
 /** Staff: turn pending drop-offs into stock (each becomes a lot). */
 export const acceptDropoffs = (ids: number[]) =>

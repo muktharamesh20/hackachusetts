@@ -1,5 +1,6 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Share, StyleSheet, Text, View } from "react-native";
+import { PantryThumb } from "@/components/PantryBits";
 import { Art, Card, ErrorText, Screen } from "@/components/ui";
 import { categoryInfo, stockLevel } from "@/lib/categories";
 import { CategoryStock, fetchCategoryStock, fetchStashPantries, Pantry } from "@/lib/stash";
@@ -35,7 +36,7 @@ export default function ShareTab() {
       <ErrorText message={error} />
       {data?.pantries.map((p) => (
         <Card key={p.id} style={styles.row} onPress={() => Share.share({ message: message(p, data.stock) })}>
-          <Art name={p.image_key ?? "illus-pantry-storefront"} width={60} height={50} rounded={12} cover={Boolean(p.image_key)} />
+          <PantryThumb pantry={p} width={60} height={50} />
           <View style={{ flex: 1 }}>
             <Text style={Type.h3}>{p.name}</Text>
             <Text style={Type.muted}>{p.city}</Text>

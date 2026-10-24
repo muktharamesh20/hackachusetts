@@ -1,6 +1,7 @@
 import * as MailComposer from "expo-mail-composer";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
+import { supabase } from "./supabase";
 // Core + SVG renderer only: the package's main entry pulls in Node-only modules.
 import QRCodeCore from "qrcode/lib/core/qrcode";
 import SvgRenderer from "qrcode/lib/renderer/svg-tag";
@@ -73,6 +74,17 @@ function slipHtml(slip: Slip): string {
 export async function makeSlipPdf(slip: Slip): Promise<string> {
   const { uri } = await Print.printToFileAsync({ html: slipHtml(slip) });
   return uri;
+}
+
+/**
+ * Email the slip to the signed-in donor from Supabase (Edge Function `send-slip` via Resend).
+ * Returns the address it went to, or throws so callers can fall back to the Mail app.
+ */
+export async function sendSlipEmail(batchId: string): Promise<string> {
+  const { data, error } = await supabase.functions.invoke("send-slip", { body: { batchId } });
+  if (error) throw new Error((await error.context?.json?.().catch(() => null))?.error ?? error.message);
+  if (!data?.ok) throw new Error(data?.error ?? "Email failed");
+  return data.to as string;
 }
 
 /** Open an email to the donor with the slip attached (falls back to the share sheet). */

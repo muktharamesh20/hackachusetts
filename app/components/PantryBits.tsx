@@ -43,10 +43,22 @@ export function StockChips({ stock, pantryId, max = 3 }: { stock: CategoryStock[
   );
 }
 
+/** Pantry photo if it has a licensed one; otherwise a map-pin tile (never a stand-in photo). */
+export function PantryThumb({ pantry, width, height, rounded = 12 }: {
+  pantry: Pick<Pantry, "image_key"> | null | undefined; width: number; height: number; rounded?: number;
+}) {
+  if (pantry?.image_key) return <Art name={pantry.image_key} width={width} height={height} rounded={rounded} cover />;
+  return (
+    <View style={[styles.pinTile, { width, height, borderRadius: rounded }]}>
+      <MaterialCommunityIcons name="map-marker" size={Math.min(width, height) * 0.5} color={Colors.sky} />
+    </View>
+  );
+}
+
 export function PantryRow({ pantry, origin, onPress }: { pantry: Pantry; origin: LatLng | null; onPress: () => void }) {
   return (
     <Card style={styles.row} onPress={onPress}>
-      <Art name={pantry.image_key ?? "illus-pantry-storefront"} width={64} height={52} rounded={12} cover={Boolean(pantry.image_key)} />
+      <PantryThumb pantry={pantry} width={64} height={52} />
       <View style={{ flex: 1, gap: 2 }}>
         <Text style={Type.h3}>{pantry.name}</Text>
         <View style={styles.metaRow}>
@@ -65,6 +77,7 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.bodyBold, fontSize: 13, color: Colors.text, paddingHorizontal: 14,
     paddingVertical: 7, borderRadius: Radii.pill, overflow: "hidden",
   },
+  pinTile: { backgroundColor: Colors.skySoft, alignItems: "center", justifyContent: "center" },
   row: { flexDirection: "row", alignItems: "center", gap: 12, padding: 12 },
   metaRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   dot: { width: 8, height: 8, borderRadius: 4 },

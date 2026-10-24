@@ -7,7 +7,7 @@ import { ScanDraft, ScanFlow } from "@/components/ScanFlow";
 import { Art, Button, CategoryIcon, ErrorText } from "@/components/ui";
 import { useAuth } from "@/context/AuthContext";
 import { useProfile } from "@/context/ProfileContext";
-import { emailSlip, printSlip, Slip } from "@/lib/slip";
+import { emailSlip, printSlip, sendSlipEmail, Slip } from "@/lib/slip";
 import { fetchStashPantries, submitDropoff } from "@/lib/stash";
 import { useLoad } from "@/lib/useLoad";
 import { Colors, ModeColors } from "@/theme/colors";
@@ -34,6 +34,7 @@ export default function DonorScan() {
   const [error, setError] = useState<string | null>(null);
   const [thanks, setThanks] = useState<{ count: number; pantry: string; slip: Slip } | null>(null);
   const [slipError, setSlipError] = useState<string | null>(null);
+  const [sentTo, setSentTo] = useState<string | null>(null);
   // Explain why donors scan, every time they open this tab.
   const [intro, setIntro] = useState(true);
   useFocusEffect(useCallback(() => setIntro(true), []));
@@ -72,11 +73,15 @@ export default function DonorScan() {
         items: items.map((i) => ({ name: i.name, quantity: i.quantity, expirationDate: i.expirationDate })),
         createdAt: new Date(),
       };
+      setSentTo(null);
+      setSlipError(null);
       setThanks({ count: units, pantry: pantry.name, slip });
       setBag([]);
       setReviewing(false);
-      // Email the printable slip to the donor right away.
-      emailSlip(slip, email).catch((e) => setSlipError(e?.message ?? "Couldn't open email"));
+      // Email the slip from Supabase; if that fails, open the Mail app with it attached.
+      sendSlipEmail(batchId)
+        .then((to) => setSentTo(to))
+        .catch(() => emailSlip(slip, email).catch((e) => setSlipError(e?.message ?? "Couldn't send the slip")));
     } catch (e: any) {
       setError(e?.message ?? "Couldn't drop off");
     } finally {
@@ -209,8 +214,8 @@ export default function DonorScan() {
             <Text style={[Type.h1, { textAlign: "center" }]}>Thank you!</Text>
             <Text style={[Type.body, { textAlign: "center" }]}>
               {thanks?.count} {thanks?.count === 1 ? "item is" : "items are"} waiting for {thanks?.pantry}'s team.
-              We've emailed your drop-off slip{email ? ` to ${email}` : ""}. Print it and put it in your box so
-              volunteers know whose donation is whose.
+              {sentTo ? `Your drop-off slip is on its way to ${sentTo}.` : "Sending your drop-off slip…"} Print it and
+              put it in your box so volunteers know whose donation is whose.
             </Text>
             <ErrorText message={slipError} />
             <View style={styles.slipButtons}>
@@ -228,7 +233,12 @@ export default function DonorScan() {
                 variant="outline"
                 color={GREEN.main}
                 style={{ flex: 1 }}
-                onPress={() => thanks && emailSlip(thanks.slip, email).catch(() => {})}
+                onPress={() =>
+                  thanks &&
+                  sendSlipEmail(thanks.slip.batchId)
+                    .then((to) => setSentTo(to))
+                    .catch(() => emailSlip(thanks.slip, email).catch(() => {}))
+                }
               />
             </View>
             <Text style={styles.done} onPress={() => setThanks(null)}>Done</Text>

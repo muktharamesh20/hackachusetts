@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Dimensions, Pressable, StyleSheet, Text, View } from "react-native";
 import MapView, { Marker } from "react-native-maps";
 import { AppHeader } from "@/components/AppHeader";
-import { PantryRow, pantryMeta, sortByDistance, StockChips } from "@/components/PantryBits";
+import { PantryRow, pantryMeta, PantryThumb, sortByDistance, StockChips } from "@/components/PantryBits";
 import { Art, Button, Card, ErrorText, Screen } from "@/components/ui";
 import { useUserLocation } from "@/lib/location";
 import { fetchCategoryStock, fetchPantries, isOpenNow } from "@/lib/stash";
@@ -99,7 +99,7 @@ export default function NeighborHome() {
       {selected && data && (
         <Card style={styles.selectedCard}>
           <Pressable style={styles.selectedTop} onPress={() => router.push(`/pantries/${selected.id}`)}>
-            <Art name={selected.image_key ?? "illus-pantry-storefront"} width={76} height={64} rounded={12} cover={Boolean(selected.image_key)} />
+            <PantryThumb pantry={selected} width={76} height={64} />
             <View style={{ flex: 1, gap: 2 }}>
               <Text style={[Type.h2, { fontSize: 18 }]}>{selected.name}</Text>
               <Text style={Type.muted}>{pantryMeta(selected, origin)}</Text>

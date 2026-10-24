@@ -2,7 +2,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useMemo, useState } from "react";
 import { Modal, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from "react-native";
-import { pantryMeta, StockChips } from "@/components/PantryBits";
+import { pantryMeta, PantryThumb, StockChips } from "@/components/PantryBits";
 import { Art, Button, Card, Chip, ErrorText, Screen } from "@/components/ui";
 import { CATEGORIES, stockLevel } from "@/lib/categories";
 import { useUserLocation } from "@/lib/location";
@@ -140,6 +140,7 @@ export default function Pantries() {
               <Chip
                 key={c.key}
                 label={c.label}
+                category={c.key}
                 active={needs.includes(c.key)}
                 color={Colors.sky}
                 onPress={() => setNeeds((n) => (n.includes(c.key) ? n.filter((k) => k !== c.key) : [...n, c.key]))}
@@ -168,7 +169,7 @@ export default function Pantries() {
       {pantries.map((p) => (
         <Card key={p.id} style={{ gap: 10 }} onPress={() => router.push(`/pantries/${p.id}`)}>
           <View style={styles.top}>
-            <Art name={p.image_key ?? "illus-pantry-storefront"} width={70} height={58} rounded={12} cover={Boolean(p.image_key)} />
+            <PantryThumb pantry={p} width={70} height={58} />
             <View style={{ flex: 1, gap: 2 }}>
               <Text style={Type.h3}>{p.name}</Text>
               <Text style={Type.muted}>{pantryMeta(p, origin)}</Text>

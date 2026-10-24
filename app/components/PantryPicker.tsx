@@ -2,7 +2,8 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useMemo, useState } from "react";
 import { FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Art, Card } from "@/components/ui";
+import { PantryThumb } from "@/components/PantryBits";
+import { Card } from "@/components/ui";
 import { Pantry } from "@/lib/stash";
 import { Colors } from "@/theme/colors";
 import { Fonts, Radii, Space, Type } from "@/theme/type";
@@ -20,13 +21,7 @@ export function PantrySelect({ pantries, value, onChange, color = Colors.olive, 
   return (
     <>
       <Card style={styles.selected} onPress={() => setOpen(true)}>
-        <Art
-          name={selected?.image_key ?? "illus-pantry-storefront"}
-          width={56}
-          height={48}
-          rounded={12}
-          cover={Boolean(selected?.image_key)}
-        />
+        <PantryThumb pantry={selected} width={56} height={48} />
         <View style={{ flex: 1 }}>
           <Text style={Type.label}>{label.toUpperCase()}</Text>
           <Text style={Type.h3} numberOfLines={1}>{selected?.name ?? "Choose a pantry"}</Text>
@@ -94,7 +89,7 @@ export function PantryPickerModal({ visible, pantries, value, color = Colors.oli
           ListEmptyComponent={<Text style={[Type.muted, { textAlign: "center", marginTop: Space.xl }]}>No pantries match.</Text>}
           renderItem={({ item: p }) => (
             <Pressable style={styles.row} onPress={() => onPick(p.id)}>
-              <Art name={p.image_key ?? "illus-pantry-storefront"} width={48} height={40} rounded={10} cover={Boolean(p.image_key)} />
+              <PantryThumb pantry={p} width={48} height={40} rounded={10} />
               <View style={{ flex: 1 }}>
                 <Text style={Type.bodySemi}>{p.name}</Text>
                 <Text style={Type.muted}>{[p.address, p.city].filter(Boolean).join(", ")}</Text>

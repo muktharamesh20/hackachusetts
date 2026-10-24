@@ -192,17 +192,21 @@ export function Button({ title, onPress, color = Colors.tomato, dark = Colors.to
   );
 }
 
-export function Chip({ label, active, onPress, color = Colors.tomato, soft }: {
+export function Chip({ label, active, onPress, color = Colors.tomato, soft, category }: {
   label: string; active?: boolean; onPress?: () => void; color?: string; soft?: string;
+  /** Lead with this category's picture. */
+  category?: string;
 }) {
   return (
     <Pressable
       onPress={onPress}
       style={[
         styles.chip,
+        category && styles.chipWithIcon,
         active ? { backgroundColor: color, borderColor: color } : soft ? { backgroundColor: soft, borderColor: soft } : null,
       ]}
     >
+      {category && <CategoryIcon category={category} size={20} plain />}
       <Text style={[styles.chipText, active && { color: Colors.white }]}>{label}</Text>
     </Pressable>
   );
@@ -293,6 +297,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14, paddingVertical: 8, borderRadius: Radii.pill,
     borderWidth: 1.5, borderColor: Colors.line, backgroundColor: Colors.card,
   },
+  chipWithIcon: { flexDirection: "row", alignItems: "center", gap: 6, paddingLeft: 6 },
   chipText: { fontFamily: Fonts.bodyBold, fontSize: 13, color: Colors.text },
   badge: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: Radii.pill, alignSelf: "flex-start" },
   badgeText: { fontFamily: Fonts.bodyHeavy, fontSize: 12 },

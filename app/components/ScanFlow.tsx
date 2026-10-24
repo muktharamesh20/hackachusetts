@@ -38,7 +38,7 @@ const EMPTY: Draft = {
  * `onSubmit` decides what saving means; return null to go straight back to the
  * camera (e.g. a donor adding to their bag), or a message for the success sheet.
  */
-export function ScanFlow({ pantryId, submitLabel, submitIcon = "package-variant-closed", onSubmit, onCode, topSlot, bottomSlot, idleTitle }: {
+export function ScanFlow({ pantryId, submitLabel, submitIcon = "package-variant-closed", onSubmit, onCode, topSlot, bottomSlot, idleTitle, hint = "Point at a QR label or barcode" }: {
   /** Pantry to match scanned codes against existing items (null: skip). */
   pantryId: string | null;
   submitLabel: string;
@@ -51,6 +51,8 @@ export function ScanFlow({ pantryId, submitLabel, submitIcon = "package-variant-
   /** Shown above "Type it in instead" while the camera is up (e.g. a bag bar). */
   bottomSlot?: ReactNode;
   idleTitle?: string;
+  /** Line over the camera. */
+  hint?: string;
 }) {
   const focused = useIsFocused();
   const [permission, requestPermission] = useCameraPermissions();
@@ -145,7 +147,7 @@ export function ScanFlow({ pantryId, submitLabel, submitIcon = "package-variant-
 
       <SafeAreaView style={styles.overlay} edges={["top"]} pointerEvents="box-none">
         <Text style={styles.hint}>
-          {stage === "camera" ? "Point at a QR label or barcode" : " "}
+          {stage === "camera" ? hint : " "}
         </Text>
         {stage === "camera" && topSlot}
         {stage === "camera" && permission?.granted && <View style={styles.frame} pointerEvents="none" />}

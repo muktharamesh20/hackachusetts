@@ -1,6 +1,7 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useEffect, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
+import { PantryThumb } from "@/components/PantryBits";
 import { Art, Card, ErrorText, Screen } from "@/components/ui";
 import { useProfile } from "@/context/ProfileContext";
 import { fetchStashPantries, Pantry } from "@/lib/stash";
@@ -42,7 +43,7 @@ export default function Onboarding() {
         <Text style={[Type.muted, styles.centerText]}>You can change this later in Settings.</Text>
         {pantries.map((p) => (
           <Card key={p.id} onPress={() => finish("pantry", p.id)} style={styles.choice}>
-            <Art name={p.image_key ?? "illus-pantry-storefront"} width={64} />
+            <PantryThumb pantry={p} width={64} height={52} />
             <View style={{ flex: 1 }}>
               <Text style={Type.h3}>{p.name}</Text>
               <Text style={Type.muted}>{p.address}, {p.city}</Text>

@@ -11,6 +11,7 @@ export default function Scan() {
   return (
     <ScanFlow
       pantryId={pantryId}
+      hint="Scan a barcode, QR label, or donor drop-off slip"
       // A donor's printed drop-off slip opens that bag for check-in.
       onCode={(code) => {
         const batch = parseSlipCode(code);

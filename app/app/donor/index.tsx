@@ -12,7 +12,6 @@ import { Fonts, Space, Type } from "@/theme/type";
 const WAYS = [
   { title: "Donate\nFood", art: "illus-donate-food", href: "/donor/needs" },
   { title: "Give\nMoney", art: "illus-give-money", href: "/donor/give" },
-  { title: "Buy Rescue\nBags", art: "illus-rescue-bag", href: "/rescue" },
 ] as const;
 
 export default function DonorHome() {

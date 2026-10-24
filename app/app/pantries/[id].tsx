@@ -2,6 +2,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useState } from "react";
 import { Dimensions, Linking, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
+import MapView, { Marker } from "react-native-maps";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
   Art, Button, Card, CategoryIcon, ErrorText, ExpiryBadge, ItemIcon, Meter,
@@ -71,7 +72,21 @@ export default function PantryDetail() {
     <View style={styles.root}>
       <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
         <View>
-          <Art name={p?.image_key ?? "illus-pantry-storefront"} width={WIDTH} height={280} rounded={0} cover={Boolean(p?.on_stash)} />
+          {p?.image_key ? (
+            <Art name={p.image_key} width={WIDTH} height={280} rounded={0} cover />
+          ) : p ? (
+            // No licensed photo: show the pantry's real location instead.
+            <MapView
+              style={{ width: WIDTH, height: 280 }}
+              pointerEvents="none"
+              showsPointsOfInterest={false}
+              initialRegion={{ latitude: p.lat - 0.0012, longitude: p.lng, latitudeDelta: 0.008, longitudeDelta: 0.008 }}
+            >
+              <Marker coordinate={{ latitude: p.lat, longitude: p.lng }} pinColor={Colors.tomato} />
+            </MapView>
+          ) : (
+            <View style={{ width: WIDTH, height: 280, backgroundColor: Colors.cardAlt }} />
+          )}
           <SafeAreaView edges={["top"]} style={styles.heroBar}>
             <Pressable onPress={() => router.back()} style={styles.circleBtn} hitSlop={8}>
               <MaterialCommunityIcons name="chevron-left" size={26} color={Colors.text} />
@@ -143,6 +158,14 @@ export default function PantryDetail() {
                   <Button title="Claim this pantry" icon="storefront-outline" onPress={claim} loading={claiming} />
                 </Card>
               )}
+              {p.image_credit && (
+                <Text
+                  style={styles.credit}
+                  onPress={() => p.image_credit_url && Linking.openURL(p.image_credit_url)}
+                >
+                  Representative photo. {p.image_credit}
+                </Text>
+              )}
               {p.id.startsWith("osm-") && (
                 <Text style={styles.credit}>Listing data © OpenStreetMap contributors</Text>
               )}
@@ -160,7 +183,7 @@ export default function PantryDetail() {
                   const target = st?.target_units ?? 1;
                   return (
                     <View key={c.key} style={styles.stockRow}>
-                      <CategoryIcon category={c.key} size={26} plain />
+                      <CategoryIcon category={c.key} size={28} plain />
                       <Text style={styles.stockLabel} numberOfLines={1}>{c.label}</Text>
                       <Meter units={units} target={target} height={8} />
                     </View>
