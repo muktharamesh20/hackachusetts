@@ -15,6 +15,7 @@ const SOURCE_LABEL: Record<string, string> = {
   robot: "Sorted by the robot",
   scan: "Scanned in",
   manual: "Added by hand",
+  donor: "Scanned in by a donor",
 };
 
 function formatDate(iso: string | null): string {

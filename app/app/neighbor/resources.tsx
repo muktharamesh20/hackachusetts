@@ -10,12 +10,12 @@ export default function Resources() {
   const { data, error } = useLoad(fetchResources);
   return (
     <Screen contentStyle={{ paddingTop: Space.sm }}>
-      <Text style={Type.h1}>Resources</Text>
-      <View style={styles.hero}>
-        <Text style={[Type.body, { flex: 1, color: Colors.textMuted }]}>
-          More help beyond the pantry shelf. All free.
-        </Text>
-        <Art name="hazel-wave" width={90} />
+      <View style={styles.header}>
+        <View style={{ flex: 1, gap: 4 }}>
+        <Text style={Type.h1}>Resources</Text>
+        <Text style={[Type.body, styles.subtitle]}>More help beyond the pantry shelf. All free.</Text>
+        </View>
+        <Art name="hazel-wave" width={84} />
       </View>
       <ErrorText message={error} />
       {(data ?? []).map((r) => (
@@ -33,7 +33,9 @@ export default function Resources() {
 }
 
 const styles = StyleSheet.create({
-  hero: { flexDirection: "row", alignItems: "center", gap: Space.md },
+  // Hazel sized to the title + tagline block, beside it.
+  header: { flexDirection: "row", alignItems: "center", gap: Space.md },
+  subtitle: { color: Colors.textMuted },
   titleRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   cta: { ...Type.h3, color: Colors.sky, fontSize: 14 },
 });

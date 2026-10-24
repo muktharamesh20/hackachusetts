@@ -40,6 +40,17 @@ export default function DonorHome() {
 
       <ErrorText message={error} />
 
+      <Card style={styles.scanCard} onPress={() => router.push("/donor/scan")}>
+        <View style={styles.scanIcon}>
+          <MaterialCommunityIcons name="barcode-scan" size={26} color={Colors.white} />
+        </View>
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text style={Type.h3}>Bringing food? Scan it in yourself</Text>
+          <Text style={Type.muted}>Saves volunteers time. Scan each item, then drop off your bag.</Text>
+        </View>
+        <MaterialCommunityIcons name="chevron-right" size={24} color={Colors.text} />
+      </Card>
+
       {shortage && (
         <Card style={styles.alert} onPress={() => router.push("/donor/needs")}>
           <MaterialCommunityIcons name="alert-circle-outline" size={30} color="#A97A12" />
@@ -93,6 +104,11 @@ const styles = StyleSheet.create({
   alert: {
     flexDirection: "row", alignItems: "center", gap: 12,
     backgroundColor: Colors.mustardSoft, borderColor: Colors.mustardSoft,
+  },
+  scanCard: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: Colors.oliveSoft, borderColor: Colors.oliveSoft },
+  scanIcon: {
+    width: 48, height: 48, borderRadius: 16, backgroundColor: Colors.olive,
+    alignItems: "center", justifyContent: "center",
   },
   ways: { flexDirection: "row", gap: 10 },
   way: { flex: 1, padding: 12, gap: 6 },

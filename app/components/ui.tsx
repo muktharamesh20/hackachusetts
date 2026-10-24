@@ -1,8 +1,10 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { ReactNode } from "react";
+import { HeaderShownContext } from "@react-navigation/elements";
+import { useNavigation } from "@react-navigation/native";
+import { ReactNode, useContext, useRef } from "react";
 import {
-  ActivityIndicator, Image, Pressable, ScrollView, ScrollViewProps, StyleProp,
+  ActivityIndicator, Image, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, ScrollViewProps, StyleProp,
   StyleSheet, Text, View, ViewStyle,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -24,13 +26,29 @@ export function Screen({
   edges?: ("top" | "bottom")[];
   contentStyle?: StyleProp<ViewStyle>;
 } & ScrollViewProps) {
+  // Under a navigator header (the home TopBar), the header already handles the top inset.
+  const headerShown = useContext(HeaderShownContext);
+  // Tell the header to show its divider once content scrolls under it.
+  const navigation = useNavigation();
+  const scrolled = useRef(false);
+  const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    rest.onScroll?.(e);
+    if (!headerShown) return;
+    const next = e.nativeEvent.contentOffset.y > 2;
+    if (next !== scrolled.current) {
+      scrolled.current = next;
+      navigation.setOptions({ headerShadowVisible: next });
+    }
+  };
   return (
-    <SafeAreaView style={styles.screen} edges={edges}>
+    <SafeAreaView style={styles.screen} edges={headerShown ? edges.filter((e) => e !== "top") : edges}>
       {scroll ? (
         <ScrollView
           contentContainerStyle={[styles.screenContent, contentStyle]}
           showsVerticalScrollIndicator={false}
           {...rest}
+          onScroll={onScroll}
+          scrollEventThrottle={16}
         >
           {children}
         </ScrollView>

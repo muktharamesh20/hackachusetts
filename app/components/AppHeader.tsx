@@ -2,6 +2,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "@/context/AuthContext";
 import { useProfile } from "@/context/ProfileContext";
 import { Colors, ModeColors, ViewMode } from "@/theme/colors";
@@ -28,18 +29,27 @@ export function Avatar({ size = 38 }: { size?: number }) {
   );
 }
 
-/** "Stash" + avatar, then the Pantry / Neighbor / Donor switcher (see reference). */
-export function AppHeader() {
+/** Fixed top bar on each view's home: "Stash" + avatar (opens More).
+ *  `line` shows a faint divider once the content underneath has scrolled. */
+export function TopBar({ line = false }: { line?: boolean }) {
   const router = useRouter();
   const { mode } = useProfile();
   return (
-    <View style={styles.wrap}>
+    <SafeAreaView edges={["top"]} style={[styles.bar, line && styles.barLine]}>
       <View style={styles.top}>
         <Text style={Type.logo}>Stash</Text>
         <Pressable onPress={() => router.push(`/${mode}/more`)} hitSlop={8}>
           <Avatar />
         </Pressable>
       </View>
+    </SafeAreaView>
+  );
+}
+
+/** Top of each view's home: the Pantry / Neighbor / Donor switcher. */
+export function AppHeader() {
+  return (
+    <View style={styles.wrap}>
       <ViewSwitcher />
     </View>
   );
@@ -76,7 +86,12 @@ export function ViewSwitcher() {
 /** Shared bottom-tab styling; active color follows the view. */
 export function tabOptions(mode: ViewMode) {
   return {
+    // Only each view's home shows the TopBar (see the index screens in the tab layouts).
     headerShown: false,
+    header: ({ options }: { options: { headerShadowVisible?: boolean } }) => (
+      <TopBar line={options.headerShadowVisible === true} />
+    ),
+    headerShadowVisible: false,
     tabBarActiveTintColor: ModeColors[mode].main,
     tabBarInactiveTintColor: Colors.textMuted,
     tabBarLabelStyle: { fontFamily: Fonts.bodyBold, fontSize: 11 },
@@ -97,8 +112,13 @@ export function tabIcon(name: IconName) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { gap: 12, paddingTop: 4 },
-  top: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  bar: {
+    backgroundColor: Colors.bg, paddingHorizontal: 20,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "transparent",
+  },
+  barLine: { borderBottomColor: Colors.line },
+  wrap: { paddingTop: 4 },
+  top: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 8 },
   avatarRing: { borderWidth: 2, borderColor: Colors.card },
   avatarFallback: { backgroundColor: Colors.mustard, alignItems: "center", justifyContent: "center" },
   avatarText: { fontFamily: Fonts.bodyHeavy, color: Colors.white, fontSize: 16 },

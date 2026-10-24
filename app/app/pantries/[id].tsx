@@ -1,10 +1,10 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useState } from "react";
-import { Dimensions, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Dimensions, Linking, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
-  Art, Button, Card, CategoryIcon, ErrorText, ExpiryBadge, ItemIcon, LevelBadge,
+  Art, Button, Card, ErrorText, ExpiryBadge, ItemIcon, Meter,
 } from "@/components/ui";
 import { useProfile } from "@/context/ProfileContext";
 import { CATEGORIES } from "@/lib/categories";
@@ -55,6 +55,12 @@ export default function PantryDetail() {
     }
   };
 
+  const share = () => {
+    if (!p) return;
+    const where = [p.address, p.city].filter(Boolean).join(", ");
+    Share.share({ message: `${p.name}: free food for anyone who needs it. ${where}. Find it on Stash.` });
+  };
+
   const directions = () => {
     if (!p) return;
     const q = encodeURIComponent(`${p.name}, ${p.address}, ${p.city}`);
@@ -82,20 +88,29 @@ export default function PantryDetail() {
           <ErrorText message={error} />
           {p && (
             <>
-              <View style={{ gap: 4 }}>
-                <Text style={Type.h1}>{p.name}</Text>
-                <Text style={Type.body}>{p.address}, {p.city}</Text>
-                {origin && <Text style={Type.muted}>{distanceMiles(origin, p).toFixed(1)} miles away</Text>}
+              <View style={{ gap: 6 }}>
+                <View style={styles.titleRow}>
+                  <Text style={[Type.h1, { flex: 1 }]}>{p.name}</Text>
+                  <Pressable onPress={() => toggleSaved(p.id)} hitSlop={10} style={styles.iconBtn}>
+                    <MaterialCommunityIcons name={saved ? "bookmark" : "bookmark-outline"} size={24} color={Colors.sky} />
+                  </Pressable>
+                  <Pressable onPress={share} hitSlop={10} style={styles.iconBtn}>
+                    <MaterialCommunityIcons name="share-variant-outline" size={23} color={Colors.sky} />
+                  </Pressable>
+                </View>
+                <Text style={Type.muted}>
+                  {[p.address, p.city].filter(Boolean).join(", ")}
+                  {origin ? `  ·  ${distanceMiles(origin, p).toFixed(1)} mi` : ""}
+                </Text>
+                <View style={styles.hours}>
+                  <MaterialCommunityIcons name="clock-outline" size={18} color={Colors.textMuted} />
+                  {p.opens_at && <Text style={Type.bodySemi}>Today</Text>}
+                  <Text style={[Type.body, { flexShrink: 1 }]}>{hoursLabel(p)}</Text>
+                  {p.website && (
+                    <Text style={styles.link} onPress={() => Linking.openURL(p.website!)}>Website</Text>
+                  )}
+                </View>
               </View>
-
-              <Card style={styles.hours}>
-                <MaterialCommunityIcons name="clock-outline" size={22} color={Colors.text} />
-                {p.opens_at && <Text style={[Type.bodySemi, { color: Colors.oliveDark }]}>Open today</Text>}
-                <Text style={[Type.bodySemi, { flex: 1 }]}>{hoursLabel(p)}</Text>
-              </Card>
-              {p.website && (
-                <Text style={styles.link} onPress={() => Linking.openURL(p.website!)}>Visit website</Text>
-              )}
 
               {!p.on_stash && (
                 <Card style={styles.notOnStash}>
@@ -115,37 +130,48 @@ export default function PantryDetail() {
 
               {p.on_stash && (
               <>
-              <View style={styles.sectionRow}>
-                <Text style={Type.h2}>What's available</Text>
-                <Text style={Type.muted}>updated today</Text>
-              </View>
-              <View style={styles.grid}>
+              <View style={{ gap: 12 }}>
+                <View style={styles.sectionRow}>
+                  <Text style={Type.h2}>What's available</Text>
+                  <Text style={Type.muted}>updated today</Text>
+                </View>
                 {CATEGORIES.map((c) => {
-                  const s = data!.stock.find((x) => x.category === c.key);
+                  const st = data!.stock.find((x) => x.category === c.key);
+                  const units = st?.units ?? 0;
+                  const target = st?.target_units ?? 1;
                   return (
-                    <View key={c.key} style={styles.tile}>
-                      <CategoryIcon category={c.key} size={34} />
-                      <Text style={styles.tileLabel} numberOfLines={1}>{c.label}</Text>
-                      <LevelBadge units={s?.units ?? 0} target={s?.target_units ?? 1} />
+                    <View key={c.key} style={styles.stockRow}>
+                      <Art name={c.art} width={26} />
+                      <Text style={styles.stockLabel} numberOfLines={1}>{c.label}</Text>
+                      <Meter units={units} target={target} height={8} />
                     </View>
                   );
                 })}
               </View>
 
+              {mode === "donor" && (
+                <Text
+                  style={styles.link}
+                  onPress={() => router.push({ pathname: "/donor/scan", params: { pantry: p.id } })}
+                >
+                  Bringing food here? Scan a drop-off
+                </Text>
+              )}
+
               {grabSoon.length > 0 && (
-                <>
-                  <View style={styles.sectionRow}>
+                <View>
+                  <View style={[styles.sectionRow, { marginBottom: 4 }]}>
                     <Text style={Type.h2}>Grab it soon</Text>
-                    <Text style={Type.muted}>free · expiring this week</Text>
+                    <Text style={Type.muted}>free · this week</Text>
                   </View>
-                  {grabSoon.map((i) => (
-                    <Card key={i.id} style={styles.grabRow}>
-                      <ItemIcon imageKey={i.image_key} category={i.category} size={40} />
+                  {grabSoon.map((i, n) => (
+                    <View key={i.id} style={[styles.grabRow, n > 0 && styles.divider]}>
+                      <ItemIcon imageKey={i.image_key} category={i.category} size={36} />
                       <Text style={[Type.bodySemi, { flex: 1 }]}>{i.name}</Text>
                       <ExpiryBadge date={i.expiration_date} />
-                    </Card>
+                    </View>
                   ))}
-                </>
+                </View>
               )}
               </>
               )}
@@ -175,9 +201,6 @@ export default function PantryDetail() {
               onPress={directions}
             />
           )}
-          <Pressable style={styles.save} onPress={() => toggleSaved(p.id)}>
-            <MaterialCommunityIcons name={saved ? "bookmark" : "bookmark-outline"} size={24} color={Colors.sky} />
-          </Pressable>
         </SafeAreaView>
       )}
     </View>
@@ -200,26 +223,21 @@ const styles = StyleSheet.create({
   },
   body: {
     marginTop: -24, backgroundColor: Colors.bg, borderTopLeftRadius: 28, borderTopRightRadius: 28,
-    padding: Space.gutter, gap: Space.lg,
+    padding: Space.gutter, gap: Space.xl,
   },
-  hours: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 12 },
+  titleRow: { flexDirection: "row", alignItems: "flex-start", gap: 14 },
+  iconBtn: { paddingTop: 6 },
+  hours: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 4 },
   sectionRow: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between" },
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  tile: {
-    width: (WIDTH - Space.gutter * 2 - 20) / 3, backgroundColor: Colors.card, borderRadius: 16,
-    borderWidth: 1.5, borderColor: Colors.line, padding: 10, gap: 6, alignItems: "flex-start",
-  },
-  tileLabel: { fontFamily: Fonts.bodyBold, fontSize: 12, color: Colors.text },
-  link: { ...Type.h3, color: Colors.sky, fontSize: 14 },
+  stockRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  stockLabel: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text, width: 108 },
+  divider: { borderTopWidth: 1, borderTopColor: Colors.line },
+  link: { fontFamily: Fonts.bodyBold, fontSize: 14, color: Colors.sky, marginLeft: 4 },
   notOnStash: { gap: 10, alignItems: "stretch" },
   credit: { ...Type.muted, fontSize: 11, textAlign: "center" },
-  grabRow: { flexDirection: "row", alignItems: "center", gap: 12, padding: 12 },
+  grabRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 },
   bottom: {
     position: "absolute", left: 0, right: 0, bottom: 0, flexDirection: "row", gap: Space.md,
     paddingHorizontal: Space.gutter, paddingTop: Space.md, backgroundColor: Colors.bg,
-  },
-  save: {
-    width: 56, height: 56, borderRadius: 16, backgroundColor: Colors.card, borderWidth: 1.5,
-    borderColor: Colors.line, alignItems: "center", justifyContent: "center",
   },
 });

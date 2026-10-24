@@ -1,9 +1,9 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useMemo, useState } from "react";
-import { RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Modal, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from "react-native";
 import { pantryMeta, StockChips } from "@/components/PantryBits";
-import { Art, Card, Chip, ErrorText, Screen } from "@/components/ui";
+import { Art, Button, Card, Chip, ErrorText, Screen } from "@/components/ui";
 import { CATEGORIES, stockLevel } from "@/lib/categories";
 import { useUserLocation } from "@/lib/location";
 import { distanceMiles, fetchCategoryStock, fetchPantries, isOpenNow, Pantry } from "@/lib/stash";
@@ -19,7 +19,21 @@ const SORTS: { key: Sort; label: string }[] = [
   { key: "name", label: "A–Z" },
 ];
 
-/** Every pantry: search by name or town, sort, and filter by what's in stock. */
+function OptionRow({ label, selected, radio, onPress }: {
+  label: string; selected: boolean; radio?: boolean; onPress: () => void;
+}) {
+  const icon = radio
+    ? selected ? "radiobox-marked" : "radiobox-blank"
+    : selected ? "checkbox-marked" : "checkbox-blank-outline";
+  return (
+    <Pressable style={styles.option} onPress={onPress}>
+      <Text style={Type.bodySemi}>{label}</Text>
+      <MaterialCommunityIcons name={icon} size={22} color={selected ? Colors.sky : Colors.line} />
+    </Pressable>
+  );
+}
+
+/** Every pantry: search by name or town; sort + filter live in a bottom sheet. */
 export default function Pantries() {
   const router = useRouter();
   const origin = useUserLocation();
@@ -55,74 +69,101 @@ export default function Pantries() {
     });
   }, [data, origin, query, sort, openOnly, stashOnly, need]);
 
-  const filtersOn = openOnly || stashOnly || need;
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const filterCount = Number(openOnly) + Number(stashOnly) + Number(Boolean(need));
+  const clearFilters = () => {
+    setOpenOnly(false);
+    setStashOnly(false);
+    setNeed(null);
+  };
 
   return (
     <Screen contentStyle={{ paddingTop: Space.sm }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}>
-      <Text style={Type.h1}>Pantries</Text>
-      <Text style={Type.muted}>Everything is free. No sign-up at the door.</Text>
-
-      <View style={styles.search}>
-        <MaterialCommunityIcons name="magnify" size={20} color={Colors.textMuted} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search by name or town"
-          placeholderTextColor={Colors.textMuted}
-          value={query}
-          onChangeText={setQuery}
-          returnKeyType="search"
-          clearButtonMode="while-editing"
-        />
-      </View>
-
-      <View style={{ gap: 8 }}>
-        <Text style={Type.label}>SORT</Text>
-        <View style={styles.row}>
-          {SORTS.map((s) => (
-            <Chip
-              key={s.key}
-              label={s.key === "nearest" && !origin ? "Nearest (needs location)" : s.label}
-              active={sort === s.key}
-              color={Colors.sky}
-              onPress={() => setSort(s.key)}
-            />
-          ))}
+      <View style={styles.header}>
+        <View style={{ flex: 1, gap: 4 }}>
+        <Text style={Type.h1}>Pantries</Text>
+        <Text style={[Type.body, { color: Colors.textMuted }]}>Everything is free. No sign-up at the door.</Text>
         </View>
+        <Art name="hazel-acorn-hug" width={84} />
       </View>
 
-      <View style={{ gap: 8 }}>
-        <View style={styles.filterHeader}>
-          <Text style={Type.label}>FILTER</Text>
-          {filtersOn && (
-            <Text
-              style={styles.clear}
-              onPress={() => {
-                setOpenOnly(false);
-                setStashOnly(false);
-                setNeed(null);
-              }}
-            >
-              Clear
-            </Text>
+      <View style={styles.searchRow}>
+        <View style={styles.search}>
+          <MaterialCommunityIcons name="magnify" size={20} color={Colors.textMuted} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search by name or town"
+            placeholderTextColor={Colors.textMuted}
+            value={query}
+            onChangeText={setQuery}
+            returnKeyType="search"
+            clearButtonMode="while-editing"
+          />
+        </View>
+        <Pressable style={styles.sheetButton} onPress={() => setSheetOpen(true)} hitSlop={6}>
+          <MaterialCommunityIcons name="tune-variant" size={22} color={Colors.text} />
+          {filterCount > 0 && (
+            <View style={styles.countBadge}>
+              <Text style={styles.countText}>{filterCount}</Text>
+            </View>
           )}
-        </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scrollRow}>
-          <Chip label="Open now" active={openOnly} color={Colors.sky} onPress={() => setOpenOnly((v) => !v)} />
-          <Chip label="Live stock on Stash" active={stashOnly} color={Colors.sky} onPress={() => setStashOnly((v) => !v)} />
-          {CATEGORIES.map((c) => (
-            <Chip
-              key={c.key}
-              label={`Has ${c.label.toLowerCase()}`}
-              active={need === c.key}
-              color={Colors.sky}
-              onPress={() => setNeed(need === c.key ? null : c.key)}
+        </Pressable>
+      </View>
+
+      <Modal visible={sheetOpen} transparent animationType="slide" onRequestClose={() => setSheetOpen(false)}>
+        <Pressable style={styles.backdrop} onPress={() => setSheetOpen(false)} />
+        <View style={styles.sheet}>
+          <View style={styles.grabber} />
+          <View style={styles.sheetHeader}>
+            <Text style={Type.h2}>Sort & filter</Text>
+            {filterCount > 0 && <Text style={styles.clear} onPress={clearFilters}>Clear filters</Text>}
+          </View>
+
+          <Text style={Type.label}>SORT BY</Text>
+          {SORTS.map((o) => (
+            <OptionRow
+              key={o.key}
+              label={o.key === "nearest" && !origin ? "Nearest (turn on location)" : o.label}
+              selected={sort === o.key}
+              radio
+              onPress={() => setSort(o.key)}
             />
           ))}
-        </ScrollView>
-      </View>
+
+          <Text style={[Type.label, { marginTop: Space.md }]}>SHOW ONLY</Text>
+          <OptionRow label="Open now" selected={openOnly} onPress={() => setOpenOnly((v) => !v)} />
+          <OptionRow label="Live stock on Stash" selected={stashOnly} onPress={() => setStashOnly((v) => !v)} />
+
+          <Text style={[Type.label, { marginTop: Space.md }]}>HAS IN STOCK</Text>
+          <View style={styles.wrap}>
+            {CATEGORIES.map((c) => (
+              <Chip
+                key={c.key}
+                label={c.label}
+                active={need === c.key}
+                color={Colors.sky}
+                onPress={() => setNeed(need === c.key ? null : c.key)}
+              />
+            ))}
+          </View>
+
+          <Button
+            title={`Show ${pantries.length} ${pantries.length === 1 ? "pantry" : "pantries"}`}
+            color={Colors.sky}
+            dark={Colors.skyDark}
+            onPress={() => setSheetOpen(false)}
+            style={{ marginTop: Space.lg }}
+          />
+        </View>
+      </Modal>
 
       <ErrorText message={error} />
-      {data && <Text style={Type.muted}>{pantries.length} {pantries.length === 1 ? "pantry" : "pantries"}</Text>}
+      {data && (
+        <Text style={Type.muted}>
+          {pantries.length} {pantries.length === 1 ? "pantry" : "pantries"} · {SORTS.find((o) => o.key === sort)?.label.toLowerCase()}
+          {filterCount > 0 ? ` · ${filterCount} ${filterCount === 1 ? "filter" : "filters"}` : ""}
+        </Text>
+      )}
 
       {pantries.map((p) => (
         <Card key={p.id} style={{ gap: 10 }} onPress={() => router.push(`/pantries/${p.id}`)}>
@@ -145,14 +186,32 @@ export default function Pantries() {
 }
 
 const styles = StyleSheet.create({
+  // Hazel sized to the title + tagline block, beside it.
+  header: { flexDirection: "row", alignItems: "center", gap: Space.md },
+  searchRow: { flexDirection: "row", gap: Space.sm, alignItems: "center" },
   search: {
-    flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: Colors.card,
+    flex: 1, flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: Colors.card,
     borderRadius: Radii.pill, borderWidth: 1.5, borderColor: Colors.line, paddingHorizontal: 14,
   },
   searchInput: { flex: 1, paddingVertical: 12, fontFamily: Fonts.body, fontSize: 15, color: Colors.text },
-  row: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  scrollRow: { flexDirection: "row", gap: 8 },
-  filterHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  clear: { fontFamily: Fonts.bodyBold, fontSize: 13, color: Colors.sky },
+  sheetButton: {
+    width: 48, height: 48, borderRadius: 24, backgroundColor: Colors.card, borderWidth: 1.5,
+    borderColor: Colors.line, alignItems: "center", justifyContent: "center",
+  },
+  countBadge: {
+    position: "absolute", top: -2, right: -2, minWidth: 20, height: 20, borderRadius: 10,
+    backgroundColor: Colors.sky, alignItems: "center", justifyContent: "center", paddingHorizontal: 5,
+  },
+  countText: { fontFamily: Fonts.bodyHeavy, fontSize: 11, color: Colors.white },
+  backdrop: { flex: 1, backgroundColor: "#0006" },
+  sheet: {
+    backgroundColor: Colors.bg, borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    padding: Space.gutter, paddingBottom: 40, gap: 4,
+  },
+  grabber: { alignSelf: "center", width: 40, height: 5, borderRadius: 3, backgroundColor: Colors.line, marginBottom: Space.sm },
+  sheetHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: Space.sm },
+  option: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 10 },
+  wrap: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
+  clear: { fontFamily: Fonts.bodyBold, fontSize: 14, color: Colors.sky },
   top: { flexDirection: "row", gap: 12, alignItems: "center" },
 });

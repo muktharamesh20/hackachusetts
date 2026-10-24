@@ -52,7 +52,7 @@ export type Lot = {
   quantity: number;
   expiration_date: string | null;
   lot_code: string | null;
-  source: "robot" | "scan" | "manual";
+  source: "robot" | "scan" | "manual" | "donor";
   received_at: string;
 };
 
@@ -77,7 +77,7 @@ export type Activity = {
   note: string;
   transaction_type: "intake" | "distribute" | "discard";
   quantity: number;
-  source: "robot" | "scan" | "manual";
+  source: "robot" | "scan" | "manual" | "donor";
   timestamp: string;
 };
 
@@ -296,6 +296,51 @@ export const fetchMyDonations = () =>
   run<{ amount_cents: number; pantry_id: string; created_at: string }[]>(
     supabase.from("donations").select("amount_cents,pantry_id,created_at").order("created_at", { ascending: false }),
   );
+
+// --- donor drop-offs (donors scan; staff confirm into stock) ---
+
+export type Dropoff = {
+  id: number;
+  pantry_id: string;
+  name: string;
+  category: string;
+  quantity: number;
+  expiration_date: string | null;
+  barcode: string | null;
+  created_at: string;
+};
+
+export async function submitDropoff(
+  pantryId: string,
+  items: { name: string; category: string; quantity: number; expirationDate: string | null; barcode: string | null }[],
+): Promise<void> {
+  await run(
+    supabase.from("dropoff_items").insert(
+      items.map((i) => ({
+        pantry_id: pantryId,
+        name: i.name,
+        category: i.category,
+        quantity: i.quantity,
+        expiration_date: i.expirationDate,
+        barcode: i.barcode,
+      })),
+    ),
+  );
+}
+
+export const fetchPendingDropoffs = (pantryId: string) =>
+  run<Dropoff[]>(
+    supabase
+      .from("dropoff_items")
+      .select("id,pantry_id,name,category,quantity,expiration_date,barcode,created_at")
+      .eq("pantry_id", pantryId)
+      .eq("status", "pending")
+      .order("created_at", { ascending: false }),
+  );
+
+/** Staff: turn pending drop-offs into stock (each becomes a lot). */
+export const acceptDropoffs = (ids: number[]) =>
+  run<number>(supabase.rpc("accept_dropoffs", { p_ids: ids }));
 
 // --- help resources ---
 

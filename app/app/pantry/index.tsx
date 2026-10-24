@@ -2,17 +2,21 @@ import { useRouter } from "expo-router";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { AppHeader } from "@/components/AppHeader";
 import {
-  Art, Card, CategoryIcon, ErrorText, ItemIcon, Meter, Screen, SectionHeader, StatTile,
+  Art, Button, Card, CategoryIcon, ErrorText, ItemIcon, Meter, Screen, SectionHeader, StatTile,
 } from "@/components/ui";
+import { useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useStaffPantryId } from "@/context/ProfileContext";
-import { CATEGORIES, LEVEL_STYLE, Settings, stockLevel } from "@/lib/categories";
+import { CATEGORIES, Settings } from "@/lib/categories";
 import {
-  fetchActivity, fetchCategoryStock, fetchItems, fetchPantry, fetchRecentLots, timeAgo, unitsExpiringWithin,
+  acceptDropoffs, fetchActivity, fetchCategoryStock, fetchItems, fetchPantry, fetchPendingDropoffs,
+  fetchRecentLots, timeAgo, unitsExpiringWithin,
 } from "@/lib/stash";
 import { useLoad } from "@/lib/useLoad";
 import { Colors } from "@/theme/colors";
 import { Fonts, Space, Type } from "@/theme/type";
+
+const SOURCE_SHORT: Record<string, string> = { robot: "Robot", scan: "Scanned", donor: "Donor", manual: "Added" };
 
 function greeting() {
   const h = new Date().getHours();
@@ -25,12 +29,14 @@ export default function PantryHome() {
   const pantryId = useStaffPantryId();
   const firstName = (session?.user.user_metadata?.full_name ?? "").split(" ")[0];
 
-  const { data, error, refreshing, refresh } = useLoad(async () => {
-    const [pantry, items, stock, activity, recent] = await Promise.all([
+  const [accepting, setAccepting] = useState(false);
+  const [acceptError, setAcceptError] = useState<string | null>(null);
+  const { data, error, refreshing, refresh, reload } = useLoad(async () => {
+    const [pantry, items, stock, activity, recent, dropoffs] = await Promise.all([
       fetchPantry(pantryId), fetchItems(pantryId), fetchCategoryStock(pantryId),
-      fetchActivity(pantryId, 100), fetchRecentLots(pantryId, 12),
+      fetchActivity(pantryId, 100), fetchRecentLots(pantryId, 12), fetchPendingDropoffs(pantryId),
     ]);
-    return { pantry, items, stock, activity, recent };
+    return { pantry, items, stock, activity, recent, dropoffs };
   }, [pantryId]);
 
   const today = new Date().toDateString();
@@ -60,6 +66,42 @@ export default function PantryHome() {
 
       <ErrorText message={error} />
 
+      {data && data.dropoffs.length > 0 && (
+        <Card style={styles.dropoffCard}>
+          <View style={styles.dropoffTop}>
+            <Art name="illus-donate-food" width={56} />
+            <View style={{ flex: 1 }}>
+              <Text style={Type.h3}>
+                {data.dropoffs.reduce((n, d) => n + d.quantity, 0)} items scanned in by donors
+              </Text>
+              <Text style={Type.muted} numberOfLines={2}>
+                {data.dropoffs.map((d) => (d.quantity > 1 ? `${d.name} (${d.quantity})` : d.name)).join(", ")}
+              </Text>
+            </View>
+          </View>
+          <ErrorText message={acceptError} />
+          <Button
+            title="Add to stock"
+            icon="check-all"
+            color={Colors.olive}
+            dark={Colors.oliveDark}
+            loading={accepting}
+            onPress={async () => {
+              setAccepting(true);
+              setAcceptError(null);
+              try {
+                await acceptDropoffs(data.dropoffs.map((d) => d.id));
+                await reload();
+              } catch (e: any) {
+                setAcceptError(e?.message ?? "Couldn't add them");
+              } finally {
+                setAccepting(false);
+              }
+            }}
+          />
+        </Card>
+      )}
+
       {data && data.recent.length > 0 && (
         <View style={{ gap: 10 }}>
           <SectionHeader title="Recently added" action="See all" onAction={() => router.push("/pantry/activity")} />
@@ -76,7 +118,7 @@ export default function PantryHome() {
                   <Text style={styles.recentName} numberOfLines={2}>{l.item.name}</Text>
                   <Text style={styles.recentQty}>+{l.quantity}</Text>
                   <Text style={Type.muted}>
-                    {l.source === "robot" ? "Robot" : l.source === "scan" ? "Scanned" : "Added"} · {timeAgo(l.received_at)}
+                    {SOURCE_SHORT[l.source] ?? "Added"} · {timeAgo(l.received_at)}
                   </Text>
                 </Card>
               </Pressable>
@@ -91,15 +133,11 @@ export default function PantryHome() {
           const row = data?.stock.find((s) => s.category === c.key);
           const units = row?.units ?? 0;
           const target = row?.target_units ?? 1;
-          const level = LEVEL_STYLE[stockLevel(units, target)];
           return (
             <View key={c.key} style={styles.row}>
               <CategoryIcon category={c.key} size={30} />
               <Text style={styles.rowLabel} numberOfLines={1}>{c.label}</Text>
               <Meter units={units} target={target} />
-              <Text style={[styles.level, { color: level.color === Colors.mustard ? "#A97A12" : level.color }]}>
-                {level.label}
-              </Text>
             </View>
           );
         })}
@@ -112,11 +150,12 @@ const styles = StyleSheet.create({
   hero: { flexDirection: "row", alignItems: "center", gap: Space.md, marginTop: Space.sm },
   stats: { flexDirection: "row", gap: Space.sm },
   row: { flexDirection: "row", alignItems: "center", gap: 10 },
+  dropoffCard: { gap: 12, backgroundColor: Colors.oliveSoft, borderColor: Colors.oliveSoft },
+  dropoffTop: { flexDirection: "row", alignItems: "center", gap: 12 },
   recentScroll: { marginHorizontal: -Space.gutter },
   recentRow: { gap: 10, paddingHorizontal: Space.gutter, paddingBottom: 6 },
   recentCard: { width: 128, padding: 12, gap: 4 },
   recentName: { fontFamily: Fonts.bodyBold, fontSize: 13, color: Colors.text, minHeight: 34 },
   recentQty: { fontFamily: Fonts.displayHeavy, fontSize: 18, color: Colors.olive },
   rowLabel: { fontFamily: Fonts.bodySemi, fontSize: 14, color: Colors.text, width: 100 },
-  level: { fontFamily: Fonts.bodyBold, fontSize: 13, width: 46, textAlign: "right" },
 });

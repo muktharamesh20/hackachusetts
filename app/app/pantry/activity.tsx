@@ -20,6 +20,7 @@ const FILTERS: { key: Filter; label: string }[] = [
 function describe(a: Activity): string {
   if (a.transaction_type === "distribute") return "handed out to a neighbor";
   if (a.transaction_type === "discard") return "removed from stock";
+  if (a.source === "donor") return "scanned in by a donor";
   return a.source === "robot" ? "sorted by the robot" : "added to inventory";
 }
 
