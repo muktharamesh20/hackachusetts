@@ -122,6 +122,8 @@ python scripts/run_sim.py
 
 This spins up a Drake `MultibodyPlant` pantry scene with an arm and a bin of items, and runs the sort loop. With no trained policy present it falls back to a scripted Drake pick-and-place planner.
 
+Every item has a QR sticker on top (`PS1|sku=…|exp=…|lot=…|cat=…|cal=…|alg=…`: expiry, lot, category, calories, allergens). For each item the arm hovers its gripper camera over the sticker, decodes the rendered frame with OpenCV, and shows a scan card in Meshcat (product, expiry status, calories, allergens, destination, camera view). Then it places the item: expired items go to the dark-red discard bin and are logged as discarded, and everything else goes by category. The demo donation includes expired milk and an apple that expires in 5 days.
+
 ---
 
 ## Development

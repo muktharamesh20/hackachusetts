@@ -36,7 +36,11 @@ def main() -> None:
     loop = SortLoop(use_sim=True)
     result = loop.run()
 
-    print(f"\nSorted {result.num_sorted} item(s).")
+    scanned = sum(1 for s in result.scans if s.source == "camera" and s.payload is not None)
+    print(f"\nSorted {result.num_sorted} item(s); {scanned} identified by QR camera scan.")
+    if result.discarded:
+        print(f"{len(result.discarded)} expired item(s) sent to the discard bin: "
+              + ", ".join(i.name for i in result.discarded))
     if result.unresolved:
         print(f"{len(result.unresolved)} item(s) had no storage route.")
 

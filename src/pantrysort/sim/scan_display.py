@@ -178,7 +178,7 @@ def render_scan_card(info: ScanInfo, today: date, warn_days: int = 14) -> np.nda
             ("Expires", det.expiration_date.isoformat() if det.expiration_date else "-"),
         ]
         for key, value in rows:
-            draw.text((x0, y), key, font=_font(28), fill=(100, 100, 100))
+            draw.text((x0, y), key, font=_font(28), fill=(60, 60, 60))
             draw.text((x0 + 150, y), value, font=_font(28, bold=key in ("Expires", "Allergens")),
                       fill=color if key == "Expires" else "black")
             y += 42
@@ -197,12 +197,13 @@ def render_scan_card(info: ScanInfo, today: date, warn_days: int = 14) -> np.nda
 # --------------------------------------------------------------------------- meshcat
 
 
-CARD_WIDTH = 0.34  # m in the Meshcat scene
+CARD_WIDTH = 0.46  # m in the Meshcat scene
 
 
 def card_pose(camera_position: np.ndarray, camera_target: np.ndarray,
-              up_offset: float = 0.24, right_offset: float = -0.10):
-    """Pose of a card that faces the Meshcat camera, floating above the work area.
+              up_offset: float = 0.33, right_offset: float = -0.55):
+    """Pose of a card that faces the Meshcat camera, floating in the upper left
+    of the default view (clear of the arm and the storage pads).
 
     Returns a pydrake RigidTransform whose +z points at the camera and +y is
     the view's "up".

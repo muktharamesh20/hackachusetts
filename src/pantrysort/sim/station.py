@@ -397,15 +397,14 @@ class _ArmIK:
         ik = InverseKinematics(self.plant, self.context, with_joint_limits=True)
         q = ik.q()
         world = self.plant.world_frame()
-        # Camera roughly above the sticker (up to ~35 deg off vertical), at
-        # ``distance`` from it and aimed at it; an oblique view still decodes.
-        lo = look_at + np.array([-0.6 * distance, -0.6 * distance, 0.8 * distance])
-        hi = look_at + np.array([0.6 * distance, 0.6 * distance, 1.2 * distance])
+        # Camera at ``distance`` from the sticker, aimed at it, and no more than
+        # ~45 degrees off vertical (an oblique view still decodes).
+        lo = look_at + np.array([-distance, -distance, 0.7 * distance])
+        hi = look_at + np.array([distance, distance, 1.1 * distance])
         ik.AddPositionConstraint(self.tcp, cam, world, lo, hi)
         ik.AddPointToPointDistanceConstraint(self.tcp, cam, world, look_at,
                                              distance - 0.006, distance + 0.006)
-        ik.AddGazeTargetConstraint(self.tcp, cam, np.array([0.0, 0.0, 1.0]), world, look_at,
-                                   0.04)
+        ik.AddGazeTargetConstraint(self.tcp, cam, SCANNER_AXIS_IN_TCP, world, look_at, 0.04)
         prog = ik.get_mutable_prog()
         g, pan = self.gripper_index, self.pan_index
         prog.AddBoundingBoxConstraint(q_nominal[g], q_nominal[g], q[g])
@@ -445,7 +444,7 @@ def _add_scanner(builder, plant, scene_graph):
         RenderCameraCore,
         RenderEngineVtkParams,
     )
-    from pydrake.math import RigidTransform
+    from pydrake.math import RigidTransform, RotationMatrix
     from pydrake.systems.sensors import CameraInfo, RgbdSensor
 
     try:
@@ -454,7 +453,9 @@ def _add_scanner(builder, plant, scene_graph):
         logger.warning("No VTK renderer (%s); QR scanning falls back to ground truth.", exc)
         return None
     tcp = plant.GetFrameByName(TCP_FRAME)
-    X_BC = tcp.GetFixedPoseInBodyFrame().multiply(RigidTransform(SCANNER_IN_TCP))
+    # Camera +z (optical axis) = SCANNER_AXIS_IN_TCP.
+    X_TC = RigidTransform(RotationMatrix.MakeXRotation(SCANNER_TILT), SCANNER_IN_TCP)
+    X_BC = tcp.GetFixedPoseInBodyFrame().multiply(X_TC)
     core = RenderCameraCore("scanner", CameraInfo(SCANNER_PX, SCANNER_PX, SCANNER_FOV_Y),
                             ClippingRange(0.003, 2.0), RigidTransform())
     sensor = builder.AddSystem(RgbdSensor(
