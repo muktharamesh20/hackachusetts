@@ -81,3 +81,13 @@ graph TD
   `feature/vision-obstacle-pathing`.
 - Tasks 6-7 are the remaining obstacle-avoidance rollout.
 - Verify with `pytest tests/ -p no:cacheprovider` and `ruff check` (run in WSL).
+
+
+## Integration status
+
+The camera-vision task list describes the current simulation boundary. The
+robot-to-app/backend reconciliation is tracked separately in
+`.kiro/specs/pantry-app-integration/`. Do not mark camera Tasks 6–7 complete
+based only on the unmerged obstacle-avoidance branch; validate them on `main`
+first. Once a sort placement is verified, the new integration spec requires an
+atomic, idempotent robot-intake event rather than direct legacy table writes.

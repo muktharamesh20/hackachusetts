@@ -124,3 +124,24 @@ Along a planned carry path the end-effector stays at least the safety radius fro
 every obstacle point and above `ground_z + ground_margin`.
 
 **Validates: Requirements 3.3, 3.4**
+
+
+## Boundary with the pantry app and Supabase
+
+This design ends at a verified item placement and a structured sort result. The
+next integration layer is specified in
+`.kiro/specs/pantry-app-integration/design.md` and should receive a typed event,
+not directly mutate legacy `inventory_items` plus `inventory_transactions` in
+separate requests.
+
+The integration boundary must:
+
+1. Resolve the PS1 SKU through the canonical catalog.
+2. Translate legacy robot categories to current app categories, using SKU facts
+   when a broad value such as `canned` is ambiguous.
+3. Preserve lot, expiry, provenance, and confidence metadata.
+4. Call one atomic robot-intake operation after placement.
+5. Use an idempotency key so a retry cannot duplicate stock.
+
+Camera-vision tests remain independent of Supabase credentials. Drake-gated
+integration tests may inject a fake inventory gateway.

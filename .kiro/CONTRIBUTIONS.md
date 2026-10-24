@@ -52,3 +52,25 @@ Branch: `docs/wsl-drake-setup-notes` -> `main` (PR #2)
 - `DEV_NOTES.md`: known-good WSL + Python 3.12 + Drake setup (no Windows wheels);
   notes the kinematic sim and the camera-rig direction.
 - `src/pantrysort/sim/README.md`: arm API + run instructions.
+
+
+## Robot / app / Supabase integration audit and spec baseline
+
+Branch: `main` (documentation/spec update; no application code changed in this pass)
+
+- Audited the current SO-101 camera-vision simulation, QR assets/catalog,
+  lot-aware Supabase migrations, Python inventory adapter, and Expo/React Native
+  app.
+- Added `.kiro/specs/pantry-app-integration/requirements.md`, `design.md`, and
+  `tasks.md` to reconcile the existing implementations rather than create a
+  second greenfield app contract.
+- Recorded the key integration gaps: legacy Python categories versus current app
+  categories, single-row inventory versus lot-aware expiry, non-atomic
+  multi-request mutations, stale legacy schema/docs, and PantrySort versus Stash
+  naming.
+- Updated the camera-vision spec with its boundary to the canonical catalog,
+  lot-aware backend, and idempotent robot-intake event.
+- Updated steering with the current Expo/Supabase architecture, RLS/service-key
+  rules, QR/catalog precedence, and native iOS Release-build conventions.
+- The camera-vision spec still leaves Tasks 6–7 open on `main`; claims from the
+  unmerged obstacle-avoidance rollout must be validated before marking them done.

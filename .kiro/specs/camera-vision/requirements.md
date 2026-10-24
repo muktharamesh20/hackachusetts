@@ -57,3 +57,24 @@ retrospectively to anchor future changes.
 #### Acceptance Criteria
 1. WHEN a diagnostic runs THEN the system SHALL save camera frames and videos under `outputs/` in per-run folders, excluded from version control.
 2. WHERE a scene is selected THEN the system SHALL support `flat_grid`, `belt_bare`, and `belt_boxes` modes.
+
+
+## Integration boundary with the pantry app
+
+The camera-vision spec owns perception and motion decisions; it does not own
+Supabase authorization, lot accounting, or mobile UI behavior. Once a QR label
+is identified, the integration layer must convert the result into the canonical
+catalog/category and lot-aware event defined by
+`.kiro/specs/pantry-app-integration/requirements.md`.
+
+The camera pipeline SHALL preserve the following handoff facts when available:
+
+- PS1 raw payload and decoded SKU.
+- Observed item identity and confidence/source of the read.
+- Package expiration and whether it is confirmed or estimated.
+- Lot code, calories, allergens, quantity, and physical destination.
+- Simulation run identifier when the result came from Drake.
+
+A successful physical placement must precede robot intake recording. If the
+backend call fails after placement, the integration layer must retry with an
+idempotency key rather than silently dropping the inventory event.

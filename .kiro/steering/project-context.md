@@ -50,3 +50,58 @@ actual import instead.
   in timestamped run folders.
 - Branch per feature; keep `main` as the integration line. Verify with
   `pytest tests/ -p no:cacheprovider` and `ruff check` before committing.
+
+
+## Current app/backend integration context
+
+The repository now contains a substantially implemented Expo/React Native app
+under `app/` with role-aware Pantry/Donor/Neighbor flows. The app data boundary
+is `app/lib/stash.ts`; the Supabase client is `app/lib/supabase.ts`. The app
+uses the anon key and RLS, with sessions persisted through SecureStore and an
+AsyncStorage/web fallback. Do not place a service-role key in the mobile app.
+
+The current production database contract is the latest migration chain under
+`supabase/migrations/`, especially the lot-aware/app-data migration. It includes
+pantry-scoped `inventory_items`, per-expiry `inventory_lots`,
+`inventory_transactions`, `app_categories`, `catalog_items`, roles, drop-offs,
+and RPCs. The older `db/schema.sql` three-table contract is legacy and must not
+be used for new production integration work.
+
+Inventory changes must be lot-aware, FEFO-ordered, pantry-authorized, and
+atomic with their audit transaction. The robot/Python layer currently has
+legacy category values and a separate Supabase adapter; use the
+`pantry-app-integration` spec to reconcile it rather than adding another
+parallel schema.
+
+QR/catalog rules:
+
+- `PS1` payloads are shared between Python and the app.
+- SKU/catalog facts take precedence over broad legacy category labels.
+- A generic `canned` value is ambiguous and must not blindly become `protein`.
+- Expiry provenance must distinguish package-confirmed, OCR-derived,
+  catalog-estimated, and missing dates.
+- Fixtures live under `assets/qr/`; the broader source catalog is
+  `assets/catalog.yaml` and `assets/barcodes/`.
+
+## Native app build conventions
+
+For a physical iPhone production-style test, configure `app/.env` with only
+`EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY`, generate/update
+the native workspace when app config changes, configure Xcode automatic signing,
+and build the Release configuration. A Release build must embed the JavaScript
+bundle and run without Metro. Never commit `.env`, signing assets, provisioning
+profiles, or service-role credentials.
+
+The app currently has PantrySort repository/native naming and Stash UI/data
+naming. Choose and document one canonical release name before final native
+release; do not silently rename bundle identifiers or schemes in unrelated
+feature work.
+
+## Documentation source of truth
+
+- Camera/vision behavior: `.kiro/specs/camera-vision/`.
+- Robot/app/backend integration: `.kiro/specs/pantry-app-integration/`.
+- Current database contract: `supabase/migrations/`.
+- Current mobile service contract: `app/lib/stash.ts`.
+- Current robot sort entry point: `src/pantrysort/pipeline/sort_loop.py`.
+- Generated camera/video diagnostics belong under `outputs/`.
