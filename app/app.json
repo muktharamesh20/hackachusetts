@@ -7,14 +7,13 @@
     "scheme": "pantrysort",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
-    "splash": {
-      "resizeMode": "contain",
-      "backgroundColor": "#0f766e"
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.muktha.pantrysort",
-      "appleTeamId": "MNV5NQY9WU"
+      "appleTeamId": "MNV5NQY9WU",
+      "infoPlist": {
+        "CFBundleDisplayName": "Stash"
+      }
     },
     "android": {
       "package": "com.muktha.pantrysort",
@@ -28,10 +27,34 @@
       "expo-router",
       "expo-secure-store",
       "expo-font",
-      "./plugins/withIosPodDeploymentTarget"
+      "./plugins/withIosPodDeploymentTarget",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Stash uses the camera to scan QR labels and barcodes when you log items into your pantry.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Stash uses your location to show food pantries near you."
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/hazel-wave.png",
+          "imageWidth": 220,
+          "resizeMode": "contain",
+          "backgroundColor": "#FBF5EA"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "icon": "./assets/images/app-icon.png"
   }
 }

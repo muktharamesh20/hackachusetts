@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useAuth } from "@/context/AuthContext";
 import { Colors } from "@/theme/colors";
+import { Fonts } from "@/theme/type";
 
 /** "or" divider + Continue with Google. Errors are reported via onError. */
 export function GoogleButton({ onError }: { onError: (message: string | null) => void }) {
@@ -44,12 +45,12 @@ export function GoogleButton({ onError }: { onError: (message: string | null) =>
 const styles = StyleSheet.create({
   dividerRow: { flexDirection: "row", alignItems: "center", gap: 10, marginVertical: 2 },
   line: { flex: 1, height: 1, backgroundColor: Colors.border },
-  or: { color: Colors.textMuted, fontSize: 14 },
+  or: { color: Colors.textMuted, fontSize: 14, fontFamily: Fonts.body },
   button: {
     flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 10,
     backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border,
-    borderRadius: 12, paddingVertical: 15,
+    borderRadius: 16, paddingVertical: 15, borderBottomWidth: 3,
   },
   g: { fontSize: 18, fontWeight: "800", color: "#4285F4" },
-  buttonText: { color: Colors.text, fontSize: 16, fontWeight: "600" },
+  buttonText: { color: Colors.text, fontSize: 16, fontFamily: Fonts.bodyBold },
 });
