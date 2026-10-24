@@ -5,6 +5,7 @@ import {
   Text, TextInput, TouchableOpacity, View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { GoogleButton } from "@/components/GoogleButton";
 import { useAuth } from "@/context/AuthContext";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import { Colors } from "@/theme/colors";
@@ -64,6 +65,8 @@ export default function SignIn() {
         <TouchableOpacity style={styles.button} onPress={onSubmit} disabled={busy}>
           {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Sign in</Text>}
         </TouchableOpacity>
+
+        <GoogleButton onError={setError} />
 
         <View style={styles.footer}>
           <Text style={styles.footerText}>No account? </Text>

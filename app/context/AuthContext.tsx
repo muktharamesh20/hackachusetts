@@ -1,5 +1,6 @@
 import { Session } from "@supabase/supabase-js";
 import { createContext, useContext, useEffect, useState } from "react";
+import { signInWithGoogle as googleSignIn, signOutOfGoogle } from "@/lib/googleAuth";
 import { supabase } from "@/lib/supabase";
 
 type AuthState = {
@@ -7,6 +8,7 @@ type AuthState = {
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<{ needsConfirmation: boolean }>;
+  signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
 };
 
@@ -40,12 +42,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { needsConfirmation: !data.session };
   };
 
+  const signInWithGoogle = async () => {
+    const error = await googleSignIn();
+    if (error) throw new Error(error);
+  };
+
   const signOut = async () => {
+    await signOutOfGoogle();
     await supabase.auth.signOut();
   };
 
   return (
-    <AuthContext.Provider value={{ session, loading, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ session, loading, signIn, signUp, signInWithGoogle, signOut }}>
       {children}
     </AuthContext.Provider>
   );
