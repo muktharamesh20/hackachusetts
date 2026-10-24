@@ -1,6 +1,7 @@
 """The end-to-end pantry sort loop.
 
-For each item on the intake mat:
+Donation boxes ride the conveyor to the pick station one at a time. For each
+item in the box at the station (or on the intake mat, for box-less scenes):
   1. scan its QR sticker with the fixed camera rig and decode it (category,
      calories, expiry, allergens, lot), showing the result in Meshcat,
   2. decide its storage location: expired items go to the discard bin,
@@ -8,6 +9,8 @@ For each item on the intake mat:
   3. drive the robot (scripted or LeRobot policy) to pick it from the bin and
      place it at that location's drop point, and
   4. record it in the inventory (intake, plus a discard transaction if expired).
+
+When a box is empty the belt brings the next one; the empties ride on downstream.
 
 The loop is designed to run with or without Drake. If the station can be built
 it executes real pick-and-place motions; otherwise it still runs the full
@@ -42,7 +45,7 @@ from pantrysort.sim.pantry_scene import (
     PadLayout,
     PantryScene,
     SceneItem,
-    default_scene,
+    scene_for_mode,
 )
 
 logger = logging.getLogger("pantrysort.sort_loop")
@@ -66,6 +69,8 @@ class SortResult:
     unresolved: list[Detection] = field(default_factory=list)
     discarded: list[InventoryItem] = field(default_factory=list)  # expired on arrival
     scans: list[ScanOutcome] = field(default_factory=list)
+    # Per donation box: (label, {destination location id: item count}).
+    boxes: list[tuple[str, dict[str, int]]] = field(default_factory=list)
 
     @property
     def num_sorted(self) -> int:
@@ -82,7 +87,7 @@ class SortLoop:
         use_sim: bool = True,
     ) -> None:
         self.config = config
-        self.scene = scene or default_scene()
+        self.scene = scene or scene_for_mode(getattr(config.sim, "scene_mode", "flat_grid"))
         self.store = store or make_store(locations=self.scene.locations, config=config)
         self.policy = policy or make_policy(
             config.policy.backend,
@@ -124,41 +129,67 @@ class SortLoop:
             logger.info("Camera rig identified %d/%d items.",
                         len(self._identifications), len(self.scene.items))
 
-        for scene_item in self.scene.items:
-            scan = self._identify(station, scene_item, today)
-            result.scans.append(scan)
-            detection = scan.detection
-            location = self.route(detection, today)
-            self._show_scan(station, scan, location, today)
-            if location is None:
-                logger.warning("No storage location for %s; skipping.", detection.label)
-                result.unresolved.append(detection)
-                continue
-
-            # Drive the robot to move the item, if a station is available.
+        if self.scene.boxes:
+            for k, box in enumerate(self.scene.boxes):
+                if station is not None:
+                    station.convey_box_to_station(k)
+                contents = self.scene.box_items(k)
+                logger.info("%s (lot %s) at the pick station: %d item(s).",
+                            box.label, box.lot, len(contents))
+                counts: dict[str, int] = {}
+                for scene_item in contents:
+                    loc_id = self._process(station, scene_item, today, result)
+                    if loc_id is not None:
+                        counts[loc_id] = counts.get(loc_id, 0) + 1
+                result.boxes.append((box.label, counts))
+                logger.info("%s empty: %s", box.label,
+                            ", ".join(f"{n} -> {loc}" for loc, n in counts.items()) or "nothing")
             if station is not None:
-                self._pick_and_place(station, scene_item, detection, location.id)
-
-            item = detection.to_item()
-            item.location_id = location.id
-            self.store.intake(item)
-            result.sorted_items.append(item)
-            logger.info(
-                "Sorted %-24s -> %-22s (cal=%s, exp=%s)",
-                detection.label,
-                location.name,
-                item.total_calories,
-                item.expiration_date,
-            )
-            if location.id == DISCARD_LOCATION_ID:
-                self.store.discard(item.id, item.quantity,
-                                   note=f"expired {item.expiration_date} on arrival")
-                result.discarded.append(item)
+                station.run_out()
+            loose = [it for it in self.scene.items if it.box is None]
+        else:
+            loose = list(self.scene.items)
+        for scene_item in loose:
+            self._process(station, scene_item, today, result)
 
         if station is not None:
             station.finish_recording()
         self._log_report()
         return result
+
+    def _process(self, station, scene_item: SceneItem, today: date,
+                 result: SortResult) -> str | None:
+        """Scan, route, move, and record one item. Returns its destination id."""
+        scan = self._identify(station, scene_item, today)
+        result.scans.append(scan)
+        detection = scan.detection
+        location = self.route(detection, today)
+        self._show_scan(station, scan, location, today)
+        if location is None:
+            logger.warning("No storage location for %s; skipping.", detection.label)
+            result.unresolved.append(detection)
+            return None
+
+        # Drive the robot to move the item, if a station is available.
+        if station is not None:
+            self._pick_and_place(station, scene_item, detection, location.id)
+
+        item = detection.to_item()
+        item.location_id = location.id
+        self.store.intake(item)
+        result.sorted_items.append(item)
+        logger.info(
+            "Sorted %-24s -> %-22s (cal=%s, exp=%s)",
+            detection.label,
+            location.name,
+            item.total_calories,
+            item.expiration_date,
+        )
+        if location.id == DISCARD_LOCATION_ID:
+            self.store.discard(item.id, item.quantity,
+                               note=f"expired {item.expiration_date} on arrival")
+            result.discarded.append(item)
+        return location.id
 
     # ------------------------------------------------------------------ routing
 

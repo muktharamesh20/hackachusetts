@@ -29,9 +29,12 @@ class SimConfig:
     realtime_rate: float = _get_float("PANTRYSORT_SIM_REALTIME_RATE", 1.0)
     meshcat: bool = _get_bool("PANTRYSORT_MESHCAT", True)
     # Render a gripper camera and identify items by decoding their QR stickers.
-    qr_scanner: bool = _get_bool("PANTRYSORT_QR_SCANNER", True)
+    qr_scanner: bool = _get_bool("PANTRYSORT_QR_SCANNER", False)
     # Add a wide-FOV overhead camera (fisheye-approximated) for localization.
     overhead_camera: bool = _get_bool("PANTRYSORT_OVERHEAD_CAMERA", True)
+    # Scene layout: "flat_grid" (experimental default), "belt_bare" (conveyor
+    # belt, items on it, no boxes), or "belt_boxes" (full conveyor + donations).
+    scene_mode: str = os.getenv("PANTRYSORT_SCENE_MODE", "flat_grid")
 
 
 @dataclass(frozen=True)
@@ -63,7 +66,7 @@ class Config:
     log_level: str = os.getenv("PANTRYSORT_LOG_LEVEL", "INFO")
 
     @classmethod
-    def load(cls) -> "Config":
+    def load(cls) -> Config:
         return cls(
             sim=SimConfig(),
             policy=PolicyConfig(),

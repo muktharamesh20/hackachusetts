@@ -6,8 +6,11 @@ when Drake is not installed (the inventory/QR tests don't need it).
 The station contains:
   * a TheRobotStudio SO-101 arm (``assets/so101``, Apache-2.0), base welded at
     the world origin facing +x,
-  * one box body per ``SceneItem`` on the intake area in front of the arm,
-  * a colored pad per storage location (at its drop point), and
+  * a conveyor belt running past the front of the arm, carrying open cardboard
+    donation boxes (one body each) to the pick station and on past it,
+  * one body per ``SceneItem`` (packed in a donation box, or on a flat intake
+    mat for box-less scenes), each with a QR sticker,
+  * an open category bin with a name sign per storage location, and
   * a Meshcat visualizer (optional).
 
 Motion is *kinematic*: joint angles come from inverse kinematics and are set
@@ -24,6 +27,7 @@ joint trajectories from this sim map 1:1 onto the real arm's motor names.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -33,13 +37,24 @@ import numpy as np
 
 from pantrysort.config import SimConfig
 from pantrysort.sim.pantry_scene import (
+    BELT_HALF_LENGTH,
+    BELT_TOP,
+    BELT_WIDTH,
+    BELT_X,
+    BIN_WALL,
+    BIN_WALL_HEIGHT,
+    BOX_PITCH,
+    BOX_WALL,
+    DONATION_BOX_SIZE,
     ITEMS_DIR,
     LOCATION_DROP_POINTS,
     PAD_HEIGHT,
     PAD_SIZE,
     PAN_AXIS_XY,
+    STATION_Y,
     ItemShape,
     PantryScene,
+    box_station_pose,
     default_scene,
 )
 
@@ -94,9 +109,10 @@ SCANNER_TILT = np.radians(40)
 SCANNER_AXIS_IN_TCP = np.array([0.0, -np.sin(SCANNER_TILT), np.cos(SCANNER_TILT)])
 SCANNER_PX = 640
 SCANNER_FOV_Y = np.radians(45)
-# Camera-to-sticker distances to try (m). Below ~6.5 cm a 3.6 cm sticker no
-# longer fits in the 45 degree view.
-SCAN_DISTANCES = (0.09, 0.08, 0.10, 0.07)
+# Camera-to-sticker distances to try (m), sized for the 2.6 cm sticker
+# (LABEL_MAX_SIZE): close enough for ~6+ px per QR module, far enough that the
+# whole sticker stays in the 45 degree view.
+SCAN_DISTANCES = (0.065, 0.055, 0.075, 0.05)
 
 # Motion limits for smooth, non-glitchy kinematic moves. The arm is driven by
 # setting joint angles directly, so we cap how far each joint may move per
@@ -106,9 +122,27 @@ MAX_JOINT_SPEED = 2.5       # rad/s per joint
 MAX_JOINT_ACCEL = 8.0       # rad/s^2 per joint
 MAX_JOINT_STEP = 0.15       # hard cap on |dq| applied in a single move_ee_to call (rad)
 
-# Default Meshcat viewpoint (the scan card is placed to face it).
-MESHCAT_CAMERA = np.array([0.55, -0.45, 0.45])
-MESHCAT_TARGET = np.array([0.1, 0.0, 0.05])
+# Default Meshcat viewpoint (the scan card and bin signs are placed to face it).
+MESHCAT_CAMERA = np.array([0.95, -0.75, 0.62])
+MESHCAT_TARGET = np.array([0.12, 0.0, 0.02])
+
+# Conveyor motion.
+BELT_SPEED = 0.18        # m/s
+FIRST_BOX_Y = 0.55       # where the first donation box starts, upstream of the station
+RUN_OUT = 0.45           # how far the belt runs after the last box is unpacked
+CLEAT_PITCH = 0.08       # spacing of the belt's cross ribs (shows the belt moving)
+CARDBOARD = [0.74, 0.57, 0.37, 1.0]
+CARDBOARD_DARK = [0.62, 0.46, 0.29, 1.0]
+
+# Short names on the sign beside each category bin.
+BIN_SIGNS = {
+    "shelf-canned": "CANNED",
+    "shelf-dry": "DRY GOODS",
+    "bin-misc": "NON-FOOD",
+    "fridge": "FRIDGE",
+    "freezer": "FREEZER",
+    "discard": "EXPIRED",
+}
 
 _LOCATION_COLORS = {
     "shelf-canned": [0.85, 0.33, 0.25, 1.0],
@@ -153,6 +187,13 @@ class Station:
     _gripper: float = 0.0  # 0 open .. 1 closed
     _closed_q: float = GRIPPER_CLOSED_ON_ITEM  # jaw angle that touches the current item
     _grasp_offset: np.ndarray = field(default_factory=lambda: grasp_center_in_tcp(NOMINAL_ITEM_WIDTH))
+    # Conveyor state.
+    box_bodies: list[Any] = field(default_factory=list)
+    cleat_bodies: list[Any] = field(default_factory=list)
+    _box_y: list[float] = field(default_factory=list)          # current y of each box
+    _box_item_pose: dict[str, Any] = field(default_factory=dict)  # label -> X_BoxItem
+    _in_box: dict[str, int] = field(default_factory=dict)      # label -> box, until picked
+    _belt_s: float = 0.0                                        # total belt travel (m)
 
     # ------------------------------------------------------------------ state
 
@@ -182,15 +223,14 @@ class Station:
         self._grasp_offset = grasp_center_in_tcp(width)
         self._closed_q = gripper_angle_for_width(width)
 
-    def move_ee_to(self, p_W: np.ndarray) -> bool:
+    def move_ee_to(self, p_W: np.ndarray, jaw_heading: float | None = None) -> bool:
         """IK the arm so the grasp point reaches ``p_W`` with the gripper pointing roughly down.
 
-        The per-call joint change is clamped (``MAX_JOINT_STEP``) so an IK jump
-        (e.g. an elbow flip between nearby targets) eases over several calls
-        instead of snapping.
+        ``jaw_heading`` (world yaw, rad) is the direction the jaws close along;
+        None keeps them sideways to the arm's reach.
         """
         q0 = self.joint_positions()
-        q, ok = self._ik.solve(np.asarray(p_W, dtype=float), q0, self._grasp_offset)
+        q, ok = self._ik.solve(np.asarray(p_W, dtype=float), q0, self._grasp_offset, jaw_heading)
         if not ok:
             logger.debug("IK did not converge for %s; keeping best effort.", p_W)
         q = _clamp_joint_step(q0, q, MAX_JOINT_STEP, self._ik.gripper_index)
@@ -257,6 +297,7 @@ class Station:
         body = self.item_bodies[best]
         X_HI = self._X_WH().inverse().multiply(self._body_pose(body))
         self._held = (body, X_HI)
+        self._in_box.pop(best, None)  # out of the box: no longer rides the belt
         shape = self.item_shapes.get(best)
         if shape is not None:  # close the jaws on this item's actual width
             self._closed_q = gripper_angle_for_width(shape.grip_width)
@@ -265,22 +306,63 @@ class Station:
     def detach(self) -> None:
         self._held = None
 
-    def drop_held_onto(self, p_W: np.ndarray, dt: float, yaw: float = 0.0,
-                       frames: int = 6) -> None:
-        """Release the held item and animate it settling upright onto ``p_W`` at ``yaw``.
+    def jaw_heading(self) -> float:
+        """Current world yaw of the jaw closing direction (TCP +x, projected flat)."""
+        X = self.plant.CalcRelativeTransform(
+            self.plant_context, self.plant.world_frame(), self.plant.GetFrameByName(TCP_FRAME)
+        )
+        x = X.rotation().matrix()[:, 0]
+        return float(np.arctan2(x[1], x[0]))
 
-        Stands in for gravity, since motion is kinematic.
+    def wrist_roll_room(self) -> tuple[float, float]:
+        """How far wrist_roll can still turn (down, up) before its limits, in rad."""
+        i = self.plant.GetJointByName("wrist_roll", self.arm).position_start()
+        q = self.plant.GetPositions(self.plant_context)[i]
+        lo = self.plant.GetPositionLowerLimits()[i]
+        hi = self.plant.GetPositionUpperLimits()[i]
+        return float(q - lo), float(hi - q)
+
+    def heading_per_roll(self) -> float:
+        """d(jaw_heading)/d(wrist_roll) at the current pose (about +1 or -1)."""
+        i = self.plant.GetJointByName("wrist_roll", self.arm).position_start()
+        pc = self.plant_context
+        q = self.plant.GetPositions(pc).copy()
+        h0 = self.jaw_heading()
+        q2 = q.copy()
+        q2[i] += 0.05
+        self.plant.SetPositions(pc, q2)
+        h1 = self.jaw_heading()
+        self.plant.SetPositions(pc, q)
+        return float(((h1 - h0 + np.pi) % (2 * np.pi) - np.pi) / 0.05)
+
+    def held_item_yaw(self) -> float | None:
+        """World yaw of the held item's x axis (projected flat), or None."""
+        if self._held is None:
+            return None
+        x = self._body_pose(self._held[0]).rotation().matrix()[:, 0]
+        return float(np.arctan2(x[1], x[0]))
+
+    def drop_held_onto(self, p_W: np.ndarray, dt: float, yaw: float | None = None,
+                       frames: int = 6) -> None:
+        """Release the held item and animate it settling upright onto ``p_W``.
+
+        Stands in for gravity, since motion is kinematic. The item keeps the
+        heading it was held at (it only levels out as it lands); ``yaw`` just
+        picks which of the item's equivalent headings (``yaw`` + k*pi) it ends at,
+        so it never spins on its own. The arm turns the item on the way.
         """
         from pydrake.math import RigidTransform, RotationMatrix
 
         if self._held is None:
             return
+        current = self.held_item_yaw()
         body, _ = self._held
         self._held = None
         X0 = self._body_pose(body)
         start, end = X0.translation(), np.asarray(p_W, dtype=float)
+        final = current if yaw is None else _nearest_equivalent(yaw, current, np.pi)
         q0 = X0.rotation().ToQuaternion()
-        q1 = RotationMatrix.MakeZRotation(yaw).ToQuaternion()
+        q1 = RotationMatrix.MakeZRotation(final).ToQuaternion()
         for k in range(1, frames + 1):
             s = (k / frames) ** 2  # accelerate like a fall
             self.plant.SetFreeBodyPose(
@@ -451,6 +533,49 @@ class Station:
             self._update_held()
             self.publish(dt)
 
+    # ------------------------------------------------------------------ conveyor
+
+    def box_y(self, box: int) -> float:
+        return self._box_y[box]
+
+    def convey(self, distance: float, dt: float = 0.05) -> None:
+        """Run the belt ``distance`` meters downstream (-y), animating every box,
+        the items still packed in them, and the belt's ribs."""
+        if distance <= 0 or not self.box_bodies:
+            return
+        steps = max(1, math.ceil(distance / (BELT_SPEED * dt)))
+        for k in range(1, steps + 1):
+            s = 0.5 - 0.5 * math.cos(math.pi * k / steps)  # ease in/out (belt start/stop)
+            s_prev = 0.5 - 0.5 * math.cos(math.pi * (k - 1) / steps)
+            d = distance * (s - s_prev)
+            self._belt_s += d
+            self._box_y = [y - d for y in self._box_y]
+            self._update_conveyor()
+            self.publish(dt)
+
+    def convey_box_to_station(self, box: int, dt: float = 0.05) -> None:
+        """Run the belt until donation box ``box`` stops at the pick station."""
+        self.convey(self._box_y[box] - STATION_Y, dt)
+
+    def run_out(self, dt: float = 0.05) -> None:
+        """Carry the last (empty) box off the pick station."""
+        self.convey(RUN_OUT, dt)
+
+    def _update_conveyor(self) -> None:
+        from pydrake.math import RigidTransform
+
+        pc = self.plant_context
+        X_box = [RigidTransform([BELT_X, y, BELT_TOP]) for y in self._box_y]
+        for body, X in zip(self.box_bodies, X_box, strict=True):
+            self.plant.SetFreeBodyPose(pc, body, X)
+        for label, k in self._in_box.items():
+            self.plant.SetFreeBodyPose(pc, self.item_bodies[label],
+                                       X_box[k].multiply(self._box_item_pose[label]))
+        span = 2 * BELT_HALF_LENGTH
+        for j, body in enumerate(self.cleat_bodies):
+            y = -BELT_HALF_LENGTH + (j * CLEAT_PITCH - self._belt_s) % span
+            self.plant.SetFreeBodyPose(pc, body, RigidTransform([BELT_X, y, BELT_TOP + 0.0006]))
+
     # ------------------------------------------------------------------ rendering
 
     def publish(self, dt: float) -> None:
@@ -490,6 +615,11 @@ class Station:
         self.plant.SetFreeBodyPose(self.plant_context, body, self._X_WH().multiply(X_HI))
 
 
+def _nearest_equivalent(angle: float, ref: float, period: float) -> float:
+    """``angle + k*period`` closest to ``ref``."""
+    return ref + ((angle - ref + period / 2) % period - period / 2)
+
+
 def _add_so101(plant) -> Any:
     from pydrake.multibody.parsing import Parser
 
@@ -520,7 +650,7 @@ class _ArmIK:
         self._hi = plant.GetPositionUpperLimits()
         self._rng = np.random.default_rng(0)
 
-    def _solve_once(self, p_W, q_seed, q_nominal, offset):
+    def _solve_once(self, p_W, q_seed, q_nominal, offset, jaw_heading=None):
         from pydrake.multibody.inverse_kinematics import InverseKinematics
         from pydrake.solvers import Solve
 
@@ -533,15 +663,28 @@ class _ArmIK:
             self.plant.world_frame(), np.array([0.0, 0.0, -1.0]),
             self.tcp, np.array([0.0, 0.0, 1.0]), 0.0, MAX_APPROACH_TILT,
         )
-        # Jaws close sideways (tangent to the arm's reach direction), like a person
-        # reaching forward to pinch an object.
+        # Jaw closing direction (TCP +x) points along world heading ``jaw_heading``
+        # (either sign). Default: sideways, tangent to the arm's reach direction,
+        # like a person reaching forward to pinch an object.
         dx, dy = p_W[0] - PAN_AXIS_XY[0], p_W[1] - PAN_AXIS_XY[1]
         bearing = np.arctan2(dy, dx)
-        radial = np.array([np.cos(bearing), np.sin(bearing), 0.0])
+        directed = jaw_heading is not None
+        if jaw_heading is None:
+            jaw_heading = bearing + np.pi / 2
+        normal = np.array([-np.sin(jaw_heading), np.cos(jaw_heading), 0.0])
         ik.AddAngleBetweenVectorsConstraint(
-            self.plant.world_frame(), radial, self.tcp, np.array([1.0, 0.0, 0.0]),
+            self.plant.world_frame(), normal, self.tcp, np.array([1.0, 0.0, 0.0]),
             np.pi / 2 - 0.05, np.pi / 2 + 0.05,
         )
+        if directed:
+            # Also fix the sign: TCP +x points along +heading, not -heading. Without
+            # this the solver may flip the wrist 180 degrees (same jaw line, so the
+            # constraint above can't tell) and spin whatever the gripper holds.
+            ahead = np.array([np.cos(jaw_heading), np.sin(jaw_heading), 0.0])
+            ik.AddAngleBetweenVectorsConstraint(
+                self.plant.world_frame(), ahead, self.tcp, np.array([1.0, 0.0, 0.0]),
+                0.0, np.pi / 2 - 0.2,
+            )
         prog = ik.get_mutable_prog()
         g, pan = self.gripper_index, self.pan_index
         prog.AddBoundingBoxConstraint(q_nominal[g], q_nominal[g], q[g])  # IK doesn't move the jaw
@@ -556,15 +699,15 @@ class _ArmIK:
         result = Solve(prog)
         return result.GetSolution(q), result.is_success()
 
-    def solve(self, p_W: np.ndarray, q_current: np.ndarray,
-              offset: np.ndarray) -> tuple[np.ndarray, bool]:
+    def solve(self, p_W: np.ndarray, q_current: np.ndarray, offset: np.ndarray,
+              jaw_heading: float | None = None) -> tuple[np.ndarray, bool]:
         """IK so the point ``offset`` (TCP frame) reaches ``p_W``."""
-        q, ok = self._solve_once(p_W, q_current, q_current, offset)
+        q, ok = self._solve_once(p_W, q_current, q_current, offset, jaw_heading)
         tries = 0
         while not ok and tries < 8:  # random restarts for awkward targets
             seed = self._rng.uniform(self._lo, self._hi)
             seed[self.gripper_index] = q_current[self.gripper_index]
-            q, ok = self._solve_once(p_W, seed, q_current, offset)
+            q, ok = self._solve_once(p_W, seed, q_current, offset, jaw_heading)
             tries += 1
         if not ok:
             return q_current, False
@@ -697,6 +840,16 @@ def build_station(
             _register_qr_sticker(plant, body, item, name, asset_root / name)
         item_bodies[item.label] = body
 
+    box_bodies, cleat_bodies = [], []
+    if scene.boxes:
+        conveyor = plant.AddModelInstance("conveyor")
+        for k, box in enumerate(scene.boxes):
+            box_bodies.append(_add_donation_box(plant, conveyor, k, box.label))
+        n_cleats = int(round(2 * BELT_HALF_LENGTH / CLEAT_PITCH))
+        for j in range(n_cleats):
+            cleat_bodies.append(_add_cleat(plant, conveyor, j))
+    _add_bin_signs(plant, scene, asset_root / "signs")
+
     plant.Finalize()
     scanner = _add_scanner(builder, plant, scene_graph) if config.qr_scanner else None
     cameras: dict[str, Any] = {}
@@ -745,6 +898,8 @@ def build_station(
         camera_specs=camera_specs,
         _asset_dir=asset_dir,
         _ik=_ArmIK(),
+        box_bodies=box_bodies,
+        cleat_bodies=cleat_bodies,
     )
     if meshcat is not None:
         from pantrysort.sim.scan_display import ScanDisplay, card_pose
@@ -752,13 +907,20 @@ def build_station(
         station.scan_display = ScanDisplay(meshcat, asset_root / "cards",
                                            card_pose(MESHCAT_CAMERA, MESHCAT_TARGET))
 
-    # Initial configuration: gripper open, TCP hovering over the intake area,
-    # items resting on the table.
+    # Initial configuration: gripper open, TCP hovering over the pick station,
+    # loose items on the table, donation boxes queued upstream on the belt.
     pc = station.plant_context
+    X_station_inv = RigidTransform(list(box_station_pose())).inverse()
     for item in scene.items:
-        plant.SetFreeBodyPose(pc, item_bodies[item.label],
-                              RigidTransform(RotationMatrix.MakeZRotation(item.yaw),
-                                             list(item.position)))
+        X_item = RigidTransform(RotationMatrix.MakeZRotation(item.yaw), list(item.position))
+        if item.box is not None and box_bodies:
+            # Item pose relative to its box, from its pose at the pick station.
+            station._box_item_pose[item.label] = X_station_inv.multiply(X_item)
+            station._in_box[item.label] = item.box
+        else:
+            plant.SetFreeBodyPose(pc, item_bodies[item.label], X_item)
+    station._box_y = [FIRST_BOX_Y + k * BOX_PITCH for k in range(len(box_bodies))]
+    station._update_conveyor()
     station.set_gripper(0.0)
     station.move_ee_to(np.array([0.18, 0.0, 0.14]))
     diagram.ForcedPublish(station.context)
@@ -838,17 +1000,192 @@ def _register_qr_sticker(plant, body, item, name: str, out_dir: Path) -> None:
         plant.RegisterVisualGeometry(body, instance)
 
 
-def _add_ground_and_fixtures(plant, scene: PantryScene) -> None:
-    """Table surface, intake mat under the items, and a pad at each storage drop point."""
-    from pydrake.geometry import Box, HalfSpace
+def _add_donation_box(plant, instance, k: int, label: str):
+    """Open-top cardboard box (floor, four walls, front/back flaps folded out).
+
+    The body frame is at the center of the floor's underside.
+    """
+    from pydrake.geometry import Box
     from pydrake.math import RigidTransform, RotationMatrix
+    from pydrake.multibody.tree import SpatialInertia
+
+    sx, sy, h = DONATION_BOX_SIZE
+    t = BOX_WALL
+    body = plant.AddRigidBody(f"donation_box_{k}", instance,
+                              SpatialInertia.SolidBoxWithMass(0.3, sx, sy, h))
+    parts = [
+        ("floor", RigidTransform([0, 0, t / 2]), Box(sx, sy, t), CARDBOARD_DARK),
+        ("wall_px", RigidTransform([sx / 2 - t / 2, 0, h / 2]), Box(t, sy, h), CARDBOARD),
+        ("wall_nx", RigidTransform([-sx / 2 + t / 2, 0, h / 2]), Box(t, sy, h), CARDBOARD),
+        ("wall_py", RigidTransform([0, sy / 2 - t / 2, h / 2]), Box(sx - 2 * t, t, h), CARDBOARD),
+        ("wall_ny", RigidTransform([0, -sy / 2 + t / 2, h / 2]), Box(sx - 2 * t, t, h),
+         CARDBOARD),
+    ]
+    # Long flaps on the two y-walls, folded out and drooping ~30 degrees.
+    flap = 0.045
+    for side in (1, -1):
+        R = RotationMatrix.MakeXRotation(side * math.radians(30))
+        hinge = np.array([0.0, side * sy / 2, h])
+        center = hinge + R.multiply(np.array([0.0, side * flap / 2, 0.0]))
+        parts.append((f"flap_{'p' if side > 0 else 'n'}y", RigidTransform(R, center),
+                      Box(sx, flap, t), CARDBOARD))
+    for name, X, shape, color in parts:
+        plant.RegisterVisualGeometry(body, X, shape, f"{label}_{name}", color)
+    return body
+
+
+def _add_cleat(plant, instance, j: int):
+    """A thin rib across the belt; ribs move with the belt so its motion is visible."""
+    from pydrake.geometry import Box
+    from pydrake.math import RigidTransform
+    from pydrake.multibody.tree import SpatialInertia
+
+    body = plant.AddRigidBody(f"belt_rib_{j}", instance,
+                              SpatialInertia.SolidBoxWithMass(0.001, 0.01, 0.01, 0.01))
+    plant.RegisterVisualGeometry(body, RigidTransform(), Box(BELT_WIDTH - 0.01, 0.006, 0.0012),
+                                 f"belt_rib_{j}_visual", [0.28, 0.28, 0.30, 1.0])
+    return body
+
+
+def _add_conveyor_frame(plant) -> None:
+    """Static conveyor: frame, black belt, side rails, end rollers, legs, and a
+    photo-eye marking the pick station."""
+    from pydrake.geometry import Box, Cylinder
+    from pydrake.math import RigidTransform, RotationMatrix
+
+    world = plant.world_body()
+    L = 2 * BELT_HALF_LENGTH
+    steel = [0.62, 0.64, 0.67, 1.0]
+
+    def vis(name, X, shape, color):
+        plant.RegisterVisualGeometry(world, X, shape, f"conveyor_{name}", color)
+
+    vis("frame", RigidTransform([BELT_X, 0, (BELT_TOP - 0.002) / 2]),
+        Box(BELT_WIDTH + 0.01, L, BELT_TOP - 0.002), steel)
+    vis("belt", RigidTransform([BELT_X, 0, BELT_TOP - 0.001]), Box(BELT_WIDTH, L, 0.002),
+        [0.08, 0.08, 0.09, 1.0])
+    rail_h = 0.012
+    for side in (1, -1):
+        x = BELT_X + side * (BELT_WIDTH / 2 + 0.006)
+        vis(f"rail_{side}", RigidTransform([x, 0, BELT_TOP + rail_h / 2 - 0.004]),
+            Box(0.006, L, rail_h), steel)
+    R_roll = RotationMatrix.MakeYRotation(math.pi / 2)
+    for end in (1, -1):
+        vis(f"roller_{end}", RigidTransform(R_roll, [BELT_X, end * BELT_HALF_LENGTH, BELT_TOP / 2]),
+            Cylinder(BELT_TOP / 2 + 0.001, BELT_WIDTH), [0.35, 0.35, 0.38, 1.0])
+    # Photo-eye just past the stopped box's downstream wall: two posts and a beam.
+    y_eye = STATION_Y - DONATION_BOX_SIZE[1] / 2 - 0.012
+    for side in (1, -1):
+        x = BELT_X + side * (BELT_WIDTH / 2 + 0.018)
+        vis(f"eye_post_{side}", RigidTransform([x, y_eye, BELT_TOP + 0.025]),
+            Cylinder(0.005, 0.05), [0.95, 0.55, 0.10, 1.0])
+    vis("eye_beam", RigidTransform(R_roll, [BELT_X, y_eye, BELT_TOP + 0.04]),
+        Cylinder(0.0008, BELT_WIDTH + 0.036), [1.0, 0.1, 0.1, 1.0])
+
+
+def _add_bins(plant, scene: PantryScene) -> None:
+    """An open category bin (floor + four walls) at each storage location."""
+    from pydrake.geometry import Box
+    from pydrake.math import RigidTransform, RotationMatrix
+
+    world = plant.world_body()
+    rad, tan = PAD_SIZE
+    h, t = BIN_WALL_HEIGHT, BIN_WALL
+    for loc in scene.locations:
+        drop = LOCATION_DROP_POINTS.get(loc.id)
+        if drop is None:
+            continue
+        color = _LOCATION_COLORS.get(loc.id, [0.6, 0.6, 0.6, 1.0])
+        wall_color = [0.85 * c for c in color[:3]] + [1.0]
+        # Bin frame: x radial (two slots inner/outer), y tangential.
+        bearing = math.atan2(drop[1] - PAN_AXIS_XY[1], drop[0] - PAN_AXIS_XY[0])
+        X_WB = RigidTransform(RotationMatrix.MakeZRotation(bearing), [drop[0], drop[1], 0.0])
+        parts = [
+            ("floor", [0, 0, PAD_HEIGHT / 2], (rad, tan, PAD_HEIGHT), color),
+            ("wall_out", [rad / 2 - t / 2, 0, h / 2], (t, tan, h), wall_color),
+            ("wall_in", [-rad / 2 + t / 2, 0, h / 2], (t, tan, h), wall_color),
+            ("wall_l", [0, tan / 2 - t / 2, h / 2], (rad - 2 * t, t, h), wall_color),
+            ("wall_r", [0, -tan / 2 + t / 2, h / 2], (rad - 2 * t, t, h), wall_color),
+        ]
+        for name, p, size, c in parts:
+            plant.RegisterVisualGeometry(world, X_WB.multiply(RigidTransform(p)), Box(*size),
+                                         f"bin_{loc.id}_{name}", c)
+
+
+def _sign_image(text: str, color) -> np.ndarray:
+    from PIL import Image, ImageDraw, ImageFont
+
+    w, h = 360, 96
+    bg = tuple(int(255 * (0.55 + 0.45 * c)) for c in color[:3])
+    img = Image.new("RGB", (w, h), bg)
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([3, 3, w - 4, h - 4], outline=(30, 30, 30), width=5)
+    try:
+        font = ImageFont.load_default(size=52)
+    except TypeError:  # Pillow < 10.1
+        font = ImageFont.load_default()
+    box = draw.textbbox((0, 0), text, font=font)
+    draw.text(((w - (box[2] - box[0])) / 2 - box[0], (h - (box[3] - box[1])) / 2 - box[1]),
+              text, fill=(20, 20, 20), font=font)
+    return np.asarray(img)
+
+
+def _add_bin_signs(plant, scene: PantryScene, out_dir: Path) -> None:
+    """A standing name sign behind each bin, turned toward the default view."""
+    from pydrake.geometry import (
+        GeometryInstance,
+        IllustrationProperties,
+        Mesh,
+        PerceptionProperties,
+    )
+    from pydrake.math import RigidTransform, RotationMatrix
+
+    from pantrysort.sim.scan_display import write_textured_quad
+
+    world = plant.world_body()
+    sign_w, sign_h = 0.085, 0.085 * 96 / 360
+    for loc in scene.locations:
+        drop = LOCATION_DROP_POINTS.get(loc.id)
+        text = BIN_SIGNS.get(loc.id)
+        if drop is None or text is None:
+            continue
+        color = _LOCATION_COLORS.get(loc.id, [0.6, 0.6, 0.6, 1.0])
+        obj = write_textured_quad(_sign_image(text, color), out_dir, f"sign_{loc.id}",
+                                  sign_w, sign_h)
+        bearing = math.atan2(drop[1] - PAN_AXIS_XY[1], drop[0] - PAN_AXIS_XY[0])
+        radial = np.array([math.cos(bearing), math.sin(bearing), 0.0])
+        p = np.array([drop[0], drop[1], 0.0]) + radial * (PAD_SIZE[0] / 2 + 0.008)
+        p[2] = BIN_WALL_HEIGHT + 0.006 + sign_h / 2
+        normal = MESHCAT_CAMERA - p
+        normal[2] = 0.0
+        normal /= np.linalg.norm(normal)
+        up = np.array([0.0, 0.0, 1.0])
+        right = np.cross(up, normal)
+        R = RotationMatrix(np.column_stack([right, up, normal]))
+        instance = GeometryInstance(RigidTransform(R, p), Mesh(str(obj)), f"sign_{loc.id}")
+        instance.set_illustration_properties(IllustrationProperties())  # use the texture
+        instance.set_perception_properties(PerceptionProperties())      # cameras see it too
+        plant.RegisterVisualGeometry(world, instance)
+
+
+def _add_ground_and_fixtures(plant, scene: PantryScene) -> None:
+    """Table, conveyor (if the scene has donation boxes) or intake mat, and bins."""
+    from pydrake.geometry import Box, HalfSpace
+    from pydrake.math import RigidTransform
     from pydrake.multibody.plant import CoulombFriction
 
     world = plant.world_body()
     plant.RegisterCollisionGeometry(world, RigidTransform(), HalfSpace(), "ground_collision",
                                     CoulombFriction(1.0, 1.0))
-    plant.RegisterVisualGeometry(world, RigidTransform([0, 0, -0.005]), Box(1.2, 1.2, 0.01),
-                                 "table_visual", [0.80, 0.78, 0.74, 1.0])
+    _belt = bool(scene.boxes) or getattr(scene, "has_belt", False)
+    table_y = 2 * BELT_HALF_LENGTH + 0.2 if _belt else 1.2
+    plant.RegisterVisualGeometry(world, RigidTransform([0.05, 0, -0.005]),
+                                 Box(1.0, table_y, 0.01), "table_visual",
+                                 [0.80, 0.78, 0.74, 1.0])
+    _add_bins(plant, scene)
+    if _belt:
+        _add_conveyor_frame(plant)
+        return
 
     if scene.items:
         xs = [it.position[0] for it in scene.items]
@@ -858,15 +1195,3 @@ def _add_ground_and_fixtures(plant, scene: PantryScene) -> None:
         plant.RegisterVisualGeometry(world, RigidTransform([cx, cy, 0.0005]),
                                      Box(sx, sy, 0.001), "intake_mat_visual",
                                      [0.25, 0.25, 0.30, 1.0])
-
-    for loc in scene.locations:
-        drop = LOCATION_DROP_POINTS.get(loc.id)
-        if drop is None:
-            continue
-        color = _LOCATION_COLORS.get(loc.id, [0.6, 0.6, 0.6, 1.0])
-        # Long axis points radially so the pad's two slots sit inner/outer.
-        bearing = np.arctan2(drop[1] - PAN_AXIS_XY[1], drop[0] - PAN_AXIS_XY[0])
-        X = RigidTransform(RotationMatrix.MakeZRotation(bearing),
-                           [drop[0], drop[1], PAD_HEIGHT / 2])
-        plant.RegisterVisualGeometry(world, X, Box(PAD_SIZE[0], PAD_SIZE[1], PAD_HEIGHT),
-                                     f"pad_{loc.id}_visual", color)
